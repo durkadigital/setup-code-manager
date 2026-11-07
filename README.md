@@ -2,11 +2,11 @@
 
 Geräte und Einrichtungscodes in Home Assistant verwalten, lokal scannen und sichern.
 
-**Stand: Entwicklungsversion 0.1.0 auf dem Branch `feature/first-version`.
-Noch kein veröffentlichtes Release und noch kein Eintrag im HACS-Katalog.**
+**Stand: erste Test-Vorabversion 0.1.0b1 auf dem Branch `feature/first-version`.
+Für die praktische Abnahme, noch keine stabile Version oder allgemeine Katalogaufnahme.**
 Automatisierte Tests und ein isolierter Lauf mit echtem Home Assistant sind bestanden.
 Die praktische Abnahme mit eigenen Geräten steht aus. Die Oberfläche ist auf Deutsch
-und Englisch verfügbar.
+und Englisch verfügbar. [Änderungen und Grenzen dieser Vorabversion](docs/releases/0.1.0b1.md).
 
 ## Funktionen
 
@@ -31,36 +31,63 @@ Die App koppelt keine Geräte. „Ohne Code“ bezieht sich auf den Bestand dies
 Matter- und HomeKit-Codes werden nicht aus Home Assistant ausgelesen. Unterstützte
 Z-Wave-Geräte können ihre DSK über die vorhandene Integration bereitstellen.
 
-## Lokale Testinstallation
+## Testinstallation
 
 Vorgesehen für Home Assistant ab 2026.1; die aktuelle automatisierte Testumgebung
 verwendet **Home Assistant 2026.11.0 / Python 3.14**. Ältere unterstützte HA-Stände
-sind noch nicht praktisch abgenommen.
+sind noch nicht praktisch abgenommen. Vor einer Testinstallation eine aktuelle
+HA-Sicherung anlegen und die ursprüngliche Integration samt Daten erhalten.
 
-1. Den [Entwicklungsbranch](https://github.com/durkadigital/setup-code-manager/tree/feature/first-version)
-   öffnen und über **Code → Download ZIP** herunterladen, oder die aktuelle lokale
-   Arbeitskopie verwenden. Den vollständigen Ordner `custom_components/setup_code_manager`
-   nach `<HA-Konfiguration>/custom_components/setup_code_manager` kopieren.
-2. Home Assistant neu starten.
-3. Unter **Einstellungen → Geräte & Dienste → Integration hinzufügen** nach
+### Über den Marketplace ab Home Assistant 2026.11
+
+Dieser Weg setzt eine **veröffentlichte GitHub-Vorabversion `0.1.0b1`** voraus.
+Ein Entwicklungsbranch allein genügt nicht. Solange die Vorabversion nicht angeboten
+wird, die manuelle Installation unten verwenden.
+
+1. **Einstellungen → Marketplace** öffnen und das Repository
+   `https://github.com/durkadigital/setup-code-manager` als benutzerdefiniertes
+   Repository vom Typ **Integration** hinzufügen. Falls angefordert, GitHub verbinden.
+2. Die Repository-Details öffnen und **vor der Installation** die Option
+   **Vorabversionen einschließen** / **Include pre-releases** aktivieren.
+3. Die angebotene Version prüfen: **Setup Code Manager**, **`0.1.0b1`**, neue
+   Integrationskennung **`setup_code_manager`**. Wenn noch **Setup Codes**, eine
+   frühere Version oder nur **`main`** angeboten wird, nicht installieren; die
+   Repository-Daten aktualisieren und die Versionsauswahl erneut prüfen.
+4. Die Vorabversion installieren und einen vom Marketplace angeforderten
+   Home-Assistant-Neustart ausführen.
+5. Unter **Einstellungen → Geräte & Dienste → Integration hinzufügen** nach
    **Setup Code Manager** suchen und die gewünschten Geräteintegrationen wählen.
-4. Den neuen Seitenleisteneintrag als Administrator öffnen.
-5. Zunächst mit Beispieldaten testen; siehe [Abnahmeplan](docs/TESTING.de.md).
+6. Den neuen Seitenleisteneintrag als Administrator öffnen und zunächst mit
+   Beispieldaten testen; siehe [Abnahmeplan](docs/TESTING.de.md).
+
+Home Assistant 2026.11 enthält den Marketplace bereits. Diese Installation über
+ein benutzerdefiniertes Repository ist von einer Aufnahme in den allgemeinen
+Katalog zu unterscheiden; eine Katalogaufnahme ist noch nicht beantragt.
+Der Marketplace bietet Vorabversionen nur nach ausdrücklicher Aktivierung an;
+Details beschreibt die [offizielle Release-Dokumentation](https://contributors.home-assistant.io/marketplace/guides/releases/).
+
+### Alternativ manuell
+
+Die veröffentlichte Version **`0.1.0b1`** auf der
+[Release-Seite](https://github.com/durkadigital/setup-code-manager/releases) auswählen
+und deren **Source code (zip)** laden. Vor der Veröffentlichung kann die geprüfte
+lokale Arbeitskopie beziehungsweise der
+[Entwicklungsbranch](https://github.com/durkadigital/setup-code-manager/tree/feature/first-version)
+verwendet werden. Im heruntergeladenen `manifest.json` muss `0.1.0b1` stehen.
+
+Den vollständigen Ordner `custom_components/setup_code_manager` nach
+`<HA-Konfiguration>/custom_components/setup_code_manager` kopieren, HA neu starten
+und anschließend **Setup Code Manager** über Geräte & Dienste hinzufügen.
+Das GitHub-Archiv des Standardbranchs `main` ist derzeit nicht dieser Teststand.
 
 Die neue Domain `setup_code_manager` ist von `setup_codes` getrennt. Beide können
 zur Migration parallel installiert sein. Im neuen Panel erscheint bei vorhandener
 Originaldatei die Übernahmefunktion. Nach der Übernahme verändert eine Bearbeitung
 in einer der beiden Apps die andere Liste nicht.
 
-**Diese Testversion bitte noch manuell installieren.** Der Standardbranch `main`
-enthält derzeit den früheren Konzeptstand samt ursprünglicher Integration. Die
-normale HACS-Auswahl bietet Releases bzw. den Standardbranch und ist daher noch
-nicht der Installationsweg für `feature/first-version`.
-
-Nach Übernahme der geprüften Version in den Standardbranch bzw. Veröffentlichung
-kann dieses Repository als **benutzerdefiniertes HACS-Repository vom Typ Integration**
-eingebunden werden. Das ist von einer Aufnahme in den allgemeinen HACS-Katalog zu
-unterscheiden; diese ist noch nicht beantragt.
+`custom_components/setup_codes` und `.storage/setup_codes` der ursprünglichen
+Integration werden dabei weder ersetzt noch gelöscht. Eine Übernahme ist eine
+gesonderte Aktion mit Vorschau; zuerst die neue Version prüfen.
 
 ## Scan, Import und Sicherung
 

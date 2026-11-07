@@ -1,6 +1,8 @@
 # Teststand und praktische Abnahme
 
-Entwicklungsversion 0.1.0, 7. November 2026. Ausschließlich synthetische Testdaten.
+Test-Vorabversion 0.1.0b1, 7. November 2026. Ausschließlich synthetische Testdaten.
+Die Vorbereitung und lokale Prüfung dieser Version belegen noch keine Installation
+oder Abnahme in einer eigenen HA-OS-Umgebung.
 
 ## Automatisierte Prüfungen
 
@@ -26,6 +28,8 @@ Die lokalen Befehle stehen in der [README](../README.md). Auf GitHub sind auch d
 und [Hassfest](https://github.com/durkadigital/setup-code-manager/actions/runs/42364597053)
 für den veröffentlichten Entwicklungsstand `d9a70e6` bestanden. Die HACS-Validierung
 prüft Repository-Voraussetzungen; sie bedeutet keine Aufnahme in den HACS-Katalog.
+Diese CI-Nachweise beziehen sich auf den genannten Entwicklungscommit; ein neuer
+GitHub-Actions-Lauf für die Beta ist gesondert zu prüfen.
 
 ## Isolierter Lauf mit echtem Home Assistant
 
@@ -35,7 +39,7 @@ synthetische Administrator-/Standardbenutzer und einen automatisch gewählten Po
 Er nutzt weder eine vorhandene HA-Konfiguration noch echte Zugangsdaten. Zusätzliche
 Pakete werden während dieses Laufs nicht automatisch nachinstalliert.
 
-Der Lauf am 7. November 2026 bestand **13 Prüfungen**: Integration und Frontend
+Der für **0.1.0b1** erneuerte Lauf am 7. November 2026 bestand **13 Prüfungen**: Integration und Frontend
 normal einrichten, Config-Flow abschließen, sieben Web-Dateien per HTTP abrufen,
 anonymen sowie unberechtigten API-Zugriff abweisen, als Administrator speichern und
 exportieren, Daten beim Entladen/Neuladen behalten und eine zweite Einrichtung
@@ -62,9 +66,14 @@ Die Beispieldaten werden beim Neuladen zurückgesetzt.
 
 ## Noch erforderliche Abnahme im Zielsystem
 
-1. Integration aus der aktuellen Arbeitskopie in eine getrennte HA-Testinstallation
-   kopieren, HA neu starten und über Geräte & Dienste hinzufügen. Als Administrator
-   öffnen; als normaler Benutzer darf kein Zugriff auf die Codes bestehen.
+1. Nach Veröffentlichung `0.1.0b1` über das benutzerdefinierte Repository im
+   Marketplace installieren: **Vorabversionen vor der Installation einschließen**,
+   anschließend **Setup Code Manager**, Version **0.1.0b1** und Domain
+   **setup_code_manager** prüfen. Alternativ die exakt geprüfte Version manuell
+   kopieren. Anleitung: [Testinstallation](../README.md#testinstallation).
+   Einen angeforderten HA-Neustart ausführen und die Integration über Geräte &
+   Dienste hinzufügen. Die ursprüngliche Integration und ihre Daten erhalten.
+   Als Administrator öffnen; als normaler Benutzer darf kein Zugriff auf die Codes bestehen.
 2. Geräte mit Matter und HomeKit sowie ein offline geschaltetes Gerät vorbereiten.
    Bei Matter-Erfassung muss ein Gerät mit gespeichertem HomeKit-Code und fehlendem
    Matter-Code auswählbar bleiben; Speichern ergänzt denselben Inventareintrag.
@@ -83,7 +92,8 @@ Die Beispieldaten werden beim Neuladen zurückgesetzt.
 7. Die alte Integration parallel installieren und die lokale Übernahme prüfen.
    Unklare Mehrfachzuordnungen bleiben getrennt, Codes müssen vollständig erhalten bleiben.
 8. Vollständigen HA-Backup-/Restore-Test gemäß [Sicherungsanleitung](BACKUP.de.md)
-   durchführen. Erst nach dieser Abnahme eine erste öffentliche Testversion erstellen.
+   durchführen. Die Ergebnisse der Vorabversion entscheiden über weitere Betas
+   und eine spätere stabile Veröffentlichung.
 
 Nicht durchgeführt sind bislang eine produktive Installation, ein vollständiger
 HA-Restore und reale Smartphone-Kamera-/Companion-App-Abnahmen. Ein automatisierter

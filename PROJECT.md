@@ -18,7 +18,9 @@ angelegt.
 
 ## Projektstand
 
-Erste Entwicklungsversion **0.1.0**, lokal und auf GitHub unter Branch `feature/first-version`.
+Vorbereitet für die erste Test-Vorabveröffentlichung **0.1.0b1** auf dem Branch
+`feature/first-version`. Die [Versionshinweise](docs/releases/0.1.0b1.md) beschreiben
+Umfang und Grenzen; dies ist noch keine stabile Version.
 Die neue Integration liegt unter `custom_components/setup_code_manager` und hat
 von der ursprünglichen Integration getrennte API-, Panel- und Speicherkennungen.
 Grundlage bleibt [PhantomPhoton/Setup-Codes](https://github.com/PhantomPhoton/Setup-Codes),
@@ -34,8 +36,15 @@ Vorschau zur Übernahme alter Daten. Die Integration schreibt atomar unter
 [Sicherung und Wiederherstellung](docs/BACKUP.de.md) trennen den lokalen Teststand
 von der Abnahme im Zielsystem. Ein isolierter lokaler Lauf mit echtem HA Core ist
 bestanden; echte Geräte, Smartphonekamera und vollständiger Restore stehen aus.
-Noch kein veröffentlichtes Release,
-keine produktive Installation und keine HACS-Katalogaufnahme.
+Eine Installation oder Abnahme im Zielsystem ist noch nicht nachgewiesen.
+
+Nach Veröffentlichung der GitHub-Vorabversion kann `0.1.0b1` über ein
+benutzerdefiniertes Repository im integrierten Marketplace von HA 2026.11 getestet
+werden. Vorabversionen müssen **vor dem Installieren** eingeschlossen werden;
+Name, Versionsnummer und die neue Domain `setup_code_manager` sind zu prüfen.
+Der Standardbranch `main` enthält derzeit noch den früheren Stand mit `setup_codes`.
+Die ursprüngliche Integration und ihre Daten bleiben für die Migration erhalten.
+Eine Aufnahme in den allgemeinen Marketplace-/HACS-Katalog ist noch nicht beantragt.
 
 ## Konzeptunterlagen
 
