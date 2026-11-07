@@ -1,0 +1,32 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Setup Code Manager",
+        "description": "Wähle die Integrationen, deren Geräte in die Liste aufgenommen werden sollen. Das kannst du später unter Konfigurieren ändern. Bereits gespeicherte Einträge bleiben erhalten.",
+        "data": {
+          "scan_matter": "Matter-Geräte erkennen",
+          "scan_homekit": "HomeKit-Geräte erkennen",
+          "scan_zwave": "Z-Wave-Geräte erkennen"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Setup Code Manager ist bereits eingerichtet.",
+      "single_instance_allowed": "Setup Code Manager ist bereits eingerichtet."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Geräteerkennung",
+        "description": "Wähle die Integrationen für die Geräteerkennung. Bereits gespeicherte Geräte bleiben erhalten, wenn du eine Integration ausschaltest.",
+        "data": {
+          "scan_matter": "Matter-Geräte erkennen",
+          "scan_homekit": "HomeKit-Geräte erkennen",
+          "scan_zwave": "Z-Wave-Geräte erkennen"
+        }
+      }
+    }
+  }
+}

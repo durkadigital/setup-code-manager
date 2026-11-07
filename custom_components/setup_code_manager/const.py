@@ -1,4 +1,4 @@
-"""Constants for Setup Codes."""
+"""Constants for Setup Code Manager."""
 
 from __future__ import annotations
 
@@ -6,11 +6,9 @@ import json
 from pathlib import Path
 from typing import Final
 
-_MANIFEST: Final = json.loads(
-    Path(__file__).with_name("manifest.json").read_text(encoding="utf-8")
-)
+_MANIFEST: Final = json.loads(Path(__file__).with_name("manifest.json").read_text(encoding="utf-8"))
 
-DOMAIN: Final = "setup_codes"
+DOMAIN: Final = "setup_code_manager"
 VERSION: Final = str(_MANIFEST["version"])
 
 STORAGE_KEY: Final = DOMAIN
@@ -72,7 +70,7 @@ PROTOCOL_IDENTIFIER_DOMAINS: Final[dict[str, frozenset[str]]] = {
 PANEL_URL_PATH: Final = DOMAIN
 PANEL_STATIC_URL_PATH: Final = f"/{DOMAIN}_static"
 PANEL_ICON: Final = "mdi:qrcode"
-PANEL_TITLE: Final = "Setup Codes"
+PANEL_TITLE: Final = "Setup Code Manager"
 
 REFRESH_COOLDOWN: Final = 2.0
 EVENT_UPDATED: Final = f"{DOMAIN}_updated"

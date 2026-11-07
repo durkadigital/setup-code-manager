@@ -17,41 +17,31 @@ from .const import (
 )
 
 WWW_DIR = Path(__file__).parent / "www"
-_STATIC_REGISTERED = False
-_WWW_FILES = ("panel.js", "qr.js")
+_STATIC_MARKER = "setup_code_manager_static_registered"
 
 
 def static_asset_version() -> str:
     """Return VERSION plus a short hash of the served JS so browsers refetch it."""
-    digest = hashlib.md5()
-    for name in _WWW_FILES:
-        digest.update((WWW_DIR / name).read_bytes())
+    digest = hashlib.sha256()
+    for asset in sorted(WWW_DIR.rglob("*")):
+        if not asset.is_file():
+            continue
+        digest.update(str(asset.relative_to(WWW_DIR)).encode())
+        digest.update(asset.read_bytes())
         digest.update(b"\0")
     return f"{VERSION}-{digest.hexdigest()[:8]}"
 
 
 async def async_register_static(hass: HomeAssistant) -> None:
     """Serve www/ once for the HA lifetime."""
-    global _STATIC_REGISTERED
-    if _STATIC_REGISTERED:
+    if hass.data.get(_STATIC_MARKER):
         return
-    try:
-        from homeassistant.components.http import StaticPathConfig
+    from homeassistant.components.http import StaticPathConfig
 
-        await hass.http.async_register_static_paths(
-            [
-                StaticPathConfig(
-                    PANEL_STATIC_URL_PATH,
-                    str(WWW_DIR),
-                    cache_headers=False,
-                )
-            ]
-        )
-    except (ImportError, AttributeError):
-        hass.http.register_static_path(
-            PANEL_STATIC_URL_PATH, str(WWW_DIR), cache_headers=False
-        )
-    _STATIC_REGISTERED = True
+    await hass.http.async_register_static_paths(
+        [StaticPathConfig(PANEL_STATIC_URL_PATH, str(WWW_DIR), cache_headers=False)]
+    )
+    hass.data[_STATIC_MARKER] = True
 
 
 async def async_register_panel(hass: HomeAssistant) -> None:
@@ -67,11 +57,11 @@ async def async_register_panel(hass: HomeAssistant) -> None:
         frontend_url_path=PANEL_URL_PATH,
         config={
             "_panel_custom": {
-                "name": "setup-codes-panel",
+                "name": "setup-code-manager-panel",
                 "embed_iframe": False,
                 "trust_external": False,
                 "handle_safe_area": True,
-                "js_url": f"{PANEL_STATIC_URL_PATH}/panel.js?v={version}",
+                "module_url": f"{PANEL_STATIC_URL_PATH}/panel.js?v={version}",
             }
         },
         require_admin=True,

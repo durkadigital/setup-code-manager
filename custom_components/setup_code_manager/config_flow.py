@@ -1,11 +1,10 @@
-"""Config flow for Setup Codes."""
+"""Config flow for Setup Code Manager."""
 
 from __future__ import annotations
 
 from typing import Any
 
 import voluptuous as vol
-
 from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
@@ -43,7 +42,7 @@ def _scan_options(user_input: dict[str, Any]) -> dict[str, bool]:
 
 
 class SetupCodesConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for Setup Codes."""
+    """Handle a config flow for Setup Code Manager."""
 
     VERSION = 1
 
@@ -52,9 +51,7 @@ class SetupCodesConfigFlow(ConfigFlow, domain=DOMAIN):
     def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
         return SetupCodesOptionsFlow()
 
-    async def async_step_user(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if self._async_current_entries():
             return self.async_abort(reason="single_instance_allowed")
 
@@ -64,7 +61,7 @@ class SetupCodesConfigFlow(ConfigFlow, domain=DOMAIN):
         await self.async_set_unique_id(DOMAIN)
         self._abort_if_unique_id_configured()
         return self.async_create_entry(
-            title="Setup Codes",
+            title="Setup Code Manager",
             data={},
             options=_scan_options(user_input),
         )
@@ -73,9 +70,7 @@ class SetupCodesConfigFlow(ConfigFlow, domain=DOMAIN):
 class SetupCodesOptionsFlow(OptionsFlow):
     """Enable or disable protocol scanning."""
 
-    async def async_step_init(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
             return self.async_create_entry(data=_scan_options(user_input))
 

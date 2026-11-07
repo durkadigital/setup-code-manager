@@ -1,7 +1,9 @@
 # Setup Code Manager – Bildschirmkonzept
 
-Status: **Vorläufiger Vorschlag zur Durchsicht**, keine umgesetzte Oberfläche.
+Status: **Bestätigte Planungsgrundlage**. Die lokale Implementierung folgt diesem Konzept; tatsächlicher Teststand und offene Abnahmen stehen in [TESTING.de.md](TESTING.de.md).
 Stand: 7. November 2026. Die Texte und Abläufe dienen als Grundlage für die Abstimmung.
+Die visuelle Richtung der Bildentwürfe wurde bestätigt. Die folgende Geräteauswahl
+ergänzt den bestätigten Ablauf; sie ist in den bisherigen Bildern noch nicht dargestellt.
 
 ## 1. Grundmodell und Navigation
 
@@ -53,6 +55,8 @@ Nicht verknüpft
 
 Auswahl einer Zeile/Karte öffnet die Details. Codes sind in der Liste nicht ausgeschrieben.
 „Code fehlt“ bedeutet, dass für diesen Inventareintrag noch kein Code hinterlegt ist.
+Nach Auswahl eines Protokolls bezieht sich „Code fehlt“ auf dieses Protokoll.
+Ein entsprechender Filter führt direkt zu HA-Geräten, deren Code ergänzt werden kann.
 
 ## 3. Gerät hinzufügen und Code erfassen
 
@@ -77,6 +81,48 @@ Mobil stehen alle Felder untereinander; „Speichern“ ist am Formularende eind
 Name ist Pflicht. Aus dem QR verfügbare Angaben werden als Vorschlag eingetragen.
 Eine automatische zuverlässige Erkennung von Modell, Seriennummer oder HA-Gerät wird nicht versprochen.
 Scannen erfasst den Code und startet keine Matter-Kopplung oder andere Geräteinstallation.
+
+### Vorhandenes HA-Gerät direkt wählen
+
+Das Feld heißt künftig „Mit Home Assistant verknüpfen“. Nach einem Matter-Scan
+öffnet es standardmäßig diese nach Geräteverwaltung und eigenem Codebestand
+zusammengestellte Liste:
+
+```text
+HA-Gerät auswählen                                      [Schließen]
+[Name, Raum oder Modell suchen …                               ]
+[Ohne Matter-Code] [Alle HA-Geräte]
+
+Schreibtischlampe                                         [Auswählen]
+Arbeitszimmer · Matter
+Matter-Code fehlt
+
+Steckdose Sofa                                            [Auswählen]
+Wohnzimmer · Matter, HomeKit
+Matter-Code fehlt · HomeKit vorhanden
+
+[Ohne HA-Verknüpfung fortfahren]
+```
+
+Hersteller und Modell werden zusätzlich angezeigt, wenn HA sie bereitstellt.
+„Alle HA-Geräte“ enthält auch Geräte mit gespeichertem Code oder anderer Integration;
+ein vorhandener Code wird sichtbar gekennzeichnet und nicht unbemerkt ersetzt.
+Gerätename und Raum helfen bei der Suche, die Verknüpfung nutzt die konkrete Geräte-ID.
+
+Nach Auswahl zeigt das Formular das gewählte Gerät mit „Ändern“ und übernimmt
+bekannte Angaben als Vorschläge. **Speichern** legt Code und Verknüpfung gemeinsam ab.
+Ein bereits zugehöriger Inventareintrag wird ergänzt. Die Auswahl eines archivierten
+Treffers weist auf das Archiv hin und fragt vor dem Ergänzen; sie stellt ihn nicht
+automatisch wieder her. Bei mehreren Inventartreffern muss der richtige gewählt werden.
+
+Alternativ beginnt der Nutzer in der Geräteübersicht bei einem Eintrag ohne Code:
+**Gerät öffnen → Code scannen → Speichern**. Die Verknüpfung ist dann bereits gesetzt.
+Ein offline befindliches, aber noch in HA eingerichtetes Gerät bleibt auswählbar.
+
+Wurde das gewählte HA-Gerät inzwischen entfernt, bleiben die Eingaben erhalten:
+„Dieses Gerät ist nicht mehr in Home Assistant vorhanden.“ Aktionen: „Anderes Gerät
+wählen“ oder „Ohne Verknüpfung speichern“. Ein inzwischen gespeicherter anderer Code
+öffnet den Vergleich. Beide Prüfungen erfolgen vor der Übernahme.
 
 Livekamera: Rückkamera bevorzugen, Berechtigung erst beim Start anfordern und Kamera beim Schließen stoppen.
 Browser-Livekamera benötigt normalerweise HTTPS. Fotoauswahl und manuelle Eingabe bleiben verfügbar.

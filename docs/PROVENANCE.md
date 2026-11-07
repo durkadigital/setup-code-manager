@@ -1,6 +1,6 @@
 # Upstream provenance
 
-Setup Code Manager is a planned derivative of
+Setup Code Manager is a derivative of
 [PhantomPhoton/Setup-Codes](https://github.com/PhantomPhoton/Setup-Codes).
 
 | Item | Value |
@@ -14,17 +14,26 @@ Setup Code Manager is a planned derivative of
 | Fork creation date | 2026-11-07 |
 | License | MIT, Copyright (c) 2026 PhantomPhoton |
 | Upstream integration domain | `setup_codes` |
-| Planned independent domain | `setup_code_manager` |
+| Independent domain | `setup_code_manager` |
 
 The full Git history and original LICENSE are retained. The original README is
 preserved in [UPSTREAM_README.md](UPSTREAM_README.md). The bundled QR encoder
 credits Project Nayuki and Anthony Fu; its license notices must remain.
 
-At the concept stage, application files under `custom_components/setup_codes`,
-the manifest and `hacs.json` still describe the original integration. The new
-domain and features are proposals, not a released or installable new product.
-Do not install this checkout alongside the original as if it already had a
-separate domain. No new release or Marketplace catalog entry has been submitted.
+The first local development version uses `custom_components/setup_code_manager`,
+its own domain, sidebar panel, WebSocket command prefix and storage key. The
+original `.storage/setup_codes` file is read only when the user requests a
+migration preview. The original integration can remain installed during that
+comparison; the two inventories are independent after import.
+
+There is no published release or Marketplace catalog submission yet. Actual
+installation, camera and full backup/restore acceptance remain documented in
+[TESTING.de.md](TESTING.de.md).
+
+The local scanner additionally bundles jsqr@1.4.0 under Apache-2.0, with the
+complete license, npm origin and SHA-256 checksums in
+[www/vendor](../custom_components/setup_code_manager/www/vendor/README.md).
+The original MIT license and QR encoder notices remain unchanged.
 
 ## Technical naming check, 2026-11-07
 

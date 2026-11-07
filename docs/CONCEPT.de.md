@@ -2,6 +2,10 @@
 
 Stand: 7. November 2026. Vorschlag zur Durchsicht; noch nicht implementiert.
 
+Die visuelle Gestaltungsrichtung wurde bestätigt. Ergänzung vom 7. November 2026:
+Beim Erfassen soll eine gezielte Auswahl von HA-Geräten ohne passenden gespeicherten
+Code angeboten werden; Code und Verknüpfung werden gemeinsam gespeichert.
+
 ## Ziel und erster Umfang
 
 Eine lokale Home-Assistant-Integration bewahrt Geräte und ihre Einrichtungscodes
@@ -55,6 +59,49 @@ Der gespeicherte Standort bleibt bei gelöschten HA-Bereichen oder einem Umzug l
 HA-interne IDs sind Zuordnungshinweise, keine installationsübergreifende Identität.
 
 ## Scan und Codepflege
+
+### HA-Gerät ohne Code auswählen
+
+Zwei gleichwertige Einstiege unterstützen das Ergänzen bereits eingerichteter Geräte:
+
+1. **Gerät zuerst:** In der Übersicht nach fehlendem Code für ein gewähltes Protokoll
+   filtern, das HA-Gerät öffnen und „Code scannen“ oder „Code eingeben“ wählen.
+   Der bestehende Inventareintrag und die HA-Verknüpfung sind bereits ausgewählt.
+2. **Code zuerst:** Scannen oder eingeben, dann im Formular „Mit Home Assistant
+   verknüpfen“ öffnen. Standardmäßig erscheinen Geräte ohne den gerade erfassten
+   Protokollcode, zum Beispiel „HA-Geräte ohne Matter-Code“.
+
+„Ohne Code“ bezieht sich auf unseren Bestand, nicht auf einen aus HA ausgelesenen
+Matter-/HomeKit-Code. Vorhandene HomeKit-Codes schließen Geräte bei einem fehlenden
+Matter-Code nicht aus. Der Picker zeigt beispielsweise „Matter-Code fehlt · HomeKit
+vorhanden“. Für den protokollübergreifenden Überblick bedeutet „Code fehlt“ zunächst
+kein gespeicherter Code; nach Protokollauswahl gilt die Prüfung für dieses Protokoll.
+
+Die Auswahlliste ist nach Name, Raum, Hersteller oder Modell durchsuchbar. Jeder
+Treffer zeigt Name, Raum, Hersteller/Modell, Integration und den betreffenden Codestatus.
+Eindeutige interne Gerätekennungen sichern die Auswahl; Anzeigenamen dienen nur der
+Darstellung. Geeignete Protokolltreffer werden priorisiert. „Alle HA-Geräte“ zeigt
+auch physische Geräte anderer Integrationen und Geräte mit vorhandenen Codes.
+Die Liste bezieht sich auf Geräte aus der Geräteverwaltung, nicht einzelne Entitäten
+oder reine Dienste. Eine Integration beweist nicht automatisch die Codefähigkeit.
+
+Bei Auswahl werden bekannte Angaben als Vorschlag übernommen. Bereits selbst
+bearbeitete Inventarangaben bleiben erhalten. Ist das HA-Gerät schon einem Eintrag
+zugeordnet, wird dieser ergänzt statt ein zweiter angelegt. Bei mehreren möglichen
+Inventartreffern oder einem archivierten Treffer folgt eine ausdrückliche Auswahl;
+die Archivierung wird nicht automatisch aufgehoben. Bridge und untergeordnete
+Geräte werden unterschieden; ein Bridge-Code wird nicht auf alle Kinder verteilt.
+
+Die Auswahl ist im Formular sofort sichtbar. **Speichern** schreibt Code und
+Verknüpfung gemeinsam; **Abbrechen** verändert nichts. Beim Wechsel der Codeart wird
+die Auswahl erneut geprüft. Vor dem Speichern werden Geräteexistenz und vorhandene
+Codes erneut geprüft. Ein zwischenzeitlicher Codekonflikt braucht eine Entscheidung.
+Ist das HA-Gerät entfernt worden, bleibt der Entwurf erhalten und bietet ausdrücklich
+„Ohne Verknüpfung speichern“ oder die Auswahl eines anderen Geräts an.
+
+„Ohne HA-Verknüpfung speichern“ bleibt jederzeit möglich, auch wenn die Liste leer ist.
+
+### Erfassen und Speichern
 
 „Gerät hinzufügen“ bietet Scan, Bildauswahl und manuelle Eingabe. Beim bestehenden
 Eintrag ist das Ziel bereits gewählt. Nach Erkennung werden Protokoll und Code
@@ -149,6 +196,10 @@ müssen sie vor dem Backup abgeschlossen werden. Browserdaten sind kein dauerhaf
 
 - Gerät ohne HA anlegen, Code speichern, HA neu starten: Eintrag bleibt erhalten.
 - Später verknüpfen: kein zusätzlicher Inventareintrag nötig.
+- Matter-Scan: Geräte ohne Matter-Code anbieten, auch wenn bereits ein HomeKit-Code gespeichert ist.
+- HA-Gerät im Picker wählen: bekannte Angaben übernehmen und vorhandenen Inventareintrag ergänzen.
+- Code und Verknüpfung gemeinsam speichern; Abbrechen ändert weder Eintrag noch Zuordnung.
+- Gleichnamige Geräte, Bridge/Kinder, archivierte Treffer und zwischenzeitliches Entfernen eindeutig behandeln.
 - HA-Gerät löschen: Codes und Metadaten bleiben; Offline allein löst keine Trennung aus.
 - Archivieren und synchronisieren: Archivstatus bleibt bestehen.
 - Matter und HomeKit am selben Inventareintrag: beide Codes bleiben getrennt erhalten.

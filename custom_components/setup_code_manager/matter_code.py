@@ -83,11 +83,11 @@ def verhoeff_check_digit(digits: str) -> str:
 
 def _normalize_digits(raw: str) -> str:
     stripped = raw.strip()
-    digits = "".join(char for char in stripped if char.isdigit())
+    digits = "".join(char for char in stripped if char in "0123456789")
     leftover = "".join(
         char
         for char in stripped
-        if not char.isdigit() and not char.isspace() and char not in "-."
+        if char not in "0123456789" and not char.isspace() and char not in "-."
     )
     if leftover:
         raise SetupCodeError(
@@ -116,13 +116,9 @@ def validate_matter_manual_code(raw: str) -> str:
         raise SetupCodeError("This is not a valid Matter manual pairing code.")
     vid_pid_present = bool(int(digits[0]) & 0b0100)
     if vid_pid_present and length != 21:
-        raise SetupCodeError(
-            "This code includes vendor/product IDs and must be 21 digits."
-        )
+        raise SetupCodeError("This code includes vendor/product IDs and must be 21 digits.")
     if not vid_pid_present and length != 11:
-        raise SetupCodeError(
-            "This code does not include vendor/product IDs and must be 11 digits."
-        )
+        raise SetupCodeError("This code does not include vendor/product IDs and must be 11 digits.")
     if not verhoeff_valid(digits):
         raise SetupCodeError(
             "That pairing code failed the Verhoeff checksum (typo or incomplete code)."
@@ -134,7 +130,7 @@ def validate_matter_manual_code(raw: str) -> str:
     if length == 21:
         chunk4 = int(digits[10:15])
         chunk5 = int(digits[15:20])
-        if chunk4 > 0xFFFF or chunk5 > 0xFFFF:
+        if chunk4 > 0xFFF4 or chunk5 > 0xFFFF or (chunk4 != 0 and chunk5 == 0):
             raise SetupCodeError("This is not a valid Matter manual pairing code.")
     passcode = _passcode_from_chunks(int(digits[0]), chunk2, chunk3)
     if passcode > _PASSCODE_MAX or passcode in _INVALID_PASSCODES:
@@ -188,14 +184,71 @@ def _read_bits(data: bytes, start: int, length: int) -> int:
     return value
 
 
+def _valid_optional_tlv(data: bytes) -> bool:
+    """Validate the optional QR structure without discarding its original bytes.
+
+    CHIP QR optional data uses an anonymous structure containing context-tagged
+    integers or UTF-8 strings. Other TLV forms are deliberately unsupported.
+    See connectedhomeip/src/setup_payload/QRCodeSetupPayloadParser.cpp.
+    """
+    if not data:
+        return True
+    if len(data) < 2 or data[0] != 0x15 or data[-1] != 0x18:
+        return False
+    position = 1
+    tags: set[int] = set()
+    end = len(data) - 1
+    while position < end:
+        control = data[position]
+        position += 1
+        if control >> 5 != 1 or position >= end:
+            return False
+        tag = data[position]
+        position += 1
+        if tag in tags:
+            return False
+        tags.add(tag)
+        kind = control & 0x1F
+        if kind <= 7:
+            size = 1 << (kind & 3)
+            if position + size > end:
+                return False
+            number = int.from_bytes(data[position : position + size], "little", signed=kind < 4)
+            if tag == 0 and not 0 <= number <= 0xFFFFFFFF:
+                return False
+            if tag >= 0x80 and not -(1 << 31) <= number < (1 << 31):
+                return False
+            position += size
+        elif 12 <= kind <= 15:
+            length_size = 1 << (kind - 12)
+            if position + length_size > end:
+                return False
+            size = int.from_bytes(data[position : position + length_size], "little")
+            position += length_size
+            if position + size > end:
+                return False
+            try:
+                data[position : position + size].decode("utf-8", errors="strict")
+            except UnicodeDecodeError:
+                return False
+            position += size
+        else:
+            return False
+        if position > end:
+            return False
+    return position == end
+
+
 def parse_mt_payload(raw: str) -> dict[str, int] | None:
     """Parse an ``MT:`` QR into CHIP onboarding fields, or None if invalid."""
     stripped = (raw or "").strip()
     if not stripped.upper().startswith("MT:"):
         return None
-    encoded = stripped[3:].strip().split("*", 1)[0].strip()
-    if "%" in encoded:
-        encoded = encoded.split("%", 1)[0].strip()
+    # Compound/enveloped QR formats require their own parser. Never validate
+    # only the first member while persisting unchecked trailing data.
+    encoded = stripped[3:].strip()
+    if len(encoded) > 4096 or not encoded.isascii() or "*" in encoded or "%" in encoded:
+        return None
     data = _base38_decode(encoded)
     if data is None or len(data) < _QR_FIXED_BYTES:
         return None
@@ -214,7 +267,11 @@ def parse_mt_payload(raw: str) -> dict[str, int] | None:
     passcode = _read_bits(data, offset, _QR_PASSCODE_BITS)
     offset += _QR_PASSCODE_BITS
     padding = _read_bits(data, offset, _QR_PADDING_BITS)
-    if version != 0 or padding != 0:
+    if version != 0 or padding != 0 or flow == 3:
+        return None
+    if vendor_id > 0xFFF4 or (vendor_id != 0 and product_id == 0):
+        return None
+    if not _valid_optional_tlv(data[_QR_FIXED_BYTES:]):
         return None
     if passcode > _PASSCODE_MAX or passcode in _INVALID_PASSCODES:
         return None
@@ -266,11 +323,17 @@ def short_manual_pairing_code_from_digits(digits: str) -> str | None:
 
 
 def manual_pairing_code_from_mt(raw: str) -> str | None:
-    """Return the 11-digit manual pairing code encoded in an ``MT:`` QR."""
+    """Return the 11/21-digit manual pairing code encoded in an ``MT:`` QR."""
     parsed = parse_mt_payload(raw)
     if parsed is None:
         return None
-    digits = encode_manual_pairing_code(parsed["discriminator"], parsed["passcode"])
+    include_ids = parsed["flow"] != 0
+    digits = encode_manual_pairing_code(
+        parsed["discriminator"],
+        parsed["passcode"],
+        vendor_id=parsed["vendor_id"] if include_ids else None,
+        product_id=parsed["product_id"] if include_ids else None,
+    )
     try:
         return validate_matter_manual_code(digits)
     except SetupCodeError:
@@ -279,7 +342,9 @@ def manual_pairing_code_from_mt(raw: str) -> str | None:
 
 def _store_mt_payload(raw: str) -> str:
     stripped = raw.strip()
-    stored = "MT:" + stripped[3:].strip()
+    if not stripped.isascii():
+        raise SetupCodeError("This is not a valid Matter MT: QR payload.")
+    stored = "MT:" + stripped[3:].strip().upper()
     if manual_pairing_code_from_mt(stored) is None:
         raise SetupCodeError("This is not a valid Matter MT: QR payload.")
     return stored

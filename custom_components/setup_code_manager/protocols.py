@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -52,8 +52,7 @@ def identifiers_for_protocol(protocol: str, identifiers: Any) -> list[list[str]]
         if isinstance(item, (list, tuple)) and len(item) == 2:
             domain, ident = str(item[0]), str(item[1])
             if domain in domains or (
-                protocol == PROTOCOL_HOMEKIT
-                and domain.startswith(f"{HOMEKIT_CONTROLLER_DOMAIN}:")
+                protocol == PROTOCOL_HOMEKIT and domain.startswith(f"{HOMEKIT_CONTROLLER_DOMAIN}:")
             ):
                 result.append([domain, ident])
     result.sort(key=lambda pair: (pair[0], pair[1]))
@@ -134,12 +133,15 @@ def _device_snapshot(
     return snapshot
 
 
-def _scan_protocol(
-    hass: HomeAssistant, protocol: str, fallback_name: str
-) -> list[Snapshot]:
-    registry = dr.async_get(hass)
+def registry_devices(hass: HomeAssistant):
+    """Support both HA's older mapping and its newer iterable registry view."""
+    devices = dr.async_get(hass).devices
+    return devices.values() if isinstance(devices, Mapping) else devices
+
+
+def _scan_protocol(hass: HomeAssistant, protocol: str, fallback_name: str) -> list[Snapshot]:
     snapshots: list[Snapshot] = []
-    for device in registry.devices:
+    for device in registry_devices(hass):
         if not _is_protocol_device(device, protocol):
             continue
         snapshots.append(_device_snapshot(device, protocol, fallback_name))
@@ -184,9 +186,8 @@ def _zwave_dsk(node: Any) -> str | None:
 
 def scan_zwave_devices(hass: HomeAssistant) -> list[Snapshot]:
     """Return cached-field snapshots for included Z-Wave JS nodes."""
-    registry = dr.async_get(hass)
     snapshots: list[Snapshot] = []
-    for device in registry.devices:
+    for device in registry_devices(hass):
         if not _is_protocol_device(device, PROTOCOL_ZWAVE):
             continue
         if native_id_from_identifiers(PROTOCOL_ZWAVE, device.identifiers) is None:
@@ -244,11 +245,7 @@ def enabled_plugins(hass: HomeAssistant | None = None) -> list[ProtocolPlugin]:
     if hass is None:
         return [plugin for plugin in PLUGINS.values() if plugin.enabled]
     allowed = set(enabled_protocols(hass))
-    return [
-        plugin
-        for plugin in PLUGINS.values()
-        if plugin.enabled and plugin.protocol in allowed
-    ]
+    return [plugin for plugin in PLUGINS.values() if plugin.enabled and plugin.protocol in allowed]
 
 
 def scan_all(hass: HomeAssistant) -> list[Snapshot]:

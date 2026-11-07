@@ -34,17 +34,16 @@ _SETUP_CODE_MAX = 99999999
 def parse_xhm_payload(raw: str) -> dict[str, str | int] | None:
     """Parse an ``X-HM://`` QR into HAP setup fields, or None if invalid."""
     stripped = (raw or "").strip()
-    if not stripped.upper().startswith("X-HM:"):
+    if not stripped.upper().startswith("X-HM://"):
         return None
-    _prefix, _sep, rest = stripped.partition(":")
-    rest = rest.lstrip("/").strip()
-    if len(rest) != _PAYLOAD_LEN + _SETUP_ID_LEN:
+    rest = stripped[7:]
+    if len(rest) != _PAYLOAD_LEN + _SETUP_ID_LEN or not rest.isascii():
         return None
     encoded = rest[:_PAYLOAD_LEN].upper()
     setup_id = rest[_PAYLOAD_LEN:]
     if any(char not in _BASE36_DECODE for char in encoded):
         return None
-    if not setup_id.isalnum():
+    if any(char not in _BASE36_DECODE for char in setup_id):
         return None
     value = 0
     for char in encoded:
@@ -52,7 +51,10 @@ def parse_xhm_payload(raw: str) -> dict[str, str | int] | None:
     version = (value >> 43) & 0x7
     reserved = (value >> 39) & 0xF
     bit30 = (value >> 30) & 1
-    if version != 0 or reserved != 0 or bit30 != 0:
+    if value >> 46 or version != 0 or reserved != 0 or bit30 != 0:
+        return None
+    # A commissioning label must identify a category and at least one transport.
+    if not ((value >> 31) & 0xFF) or not ((value >> 28) & 0x3):
         return None
     code_int = value & _SETUP_CODE_MASK
     if code_int > _SETUP_CODE_MAX:
@@ -94,13 +96,11 @@ def validate_homekit_setup_code(raw: str) -> str:
     leftover = "".join(
         char
         for char in stripped
-        if not char.isdigit() and not char.isspace() and char not in "-."
+        if char not in "0123456789" and not char.isspace() and char not in "-."
     )
     if leftover:
-        raise SetupCodeError(
-            "HomeKit setup codes are 8 digits (XXX-XX-XXX) or an X-HM:// payload."
-        )
-    digits = "".join(char for char in stripped if char.isdigit())
+        raise SetupCodeError("HomeKit setup codes are 8 digits (XXX-XX-XXX) or an X-HM:// payload.")
+    digits = "".join(char for char in stripped if char in "0123456789")
     if len(digits) != 8:
         raise SetupCodeError("HomeKit setup codes must be 8 digits.")
     if digits in _INVALID_SETUP_CODES:

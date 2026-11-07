@@ -1,11 +1,12 @@
-"""The Setup Codes integration."""
+"""The Setup Code Manager integration."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
@@ -31,22 +32,30 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: SetupCodesConfigEntry) -> bool:
     store = SetupCodesStore(hass)
     manager = SetupCodesManager(hass, store)
-    hass.data[DOMAIN] = manager
-
-    await async_register_panel(hass)
     await manager.async_setup()
+    try:
+        await async_register_panel(hass)
+    except (Exception, asyncio.CancelledError):
+        manager.async_unload()
+        raise
+    hass.data[DOMAIN] = manager
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     entry.async_on_unload(manager.async_unload)
-    entry.async_on_unload(lambda: hass.data.pop(DOMAIN, None))
+
+    @callback
+    def clear_manager() -> None:
+        # Unload callbacks must return None (or a coroutine). Returning pop's
+        # manager value makes Home Assistant try to schedule it as a coroutine.
+        hass.data.pop(DOMAIN, None)
+
+    entry.async_on_unload(clear_manager)
     entry.async_on_unload(lambda: async_unregister_panel(hass))
-    _LOGGER.debug("Setup Codes is set up")
+    _LOGGER.debug("Setup Code Manager is set up")
     return True
 
 
-async def _async_update_listener(
-    hass: HomeAssistant, entry: SetupCodesConfigEntry
-) -> None:
+async def _async_update_listener(hass: HomeAssistant, entry: SetupCodesConfigEntry) -> None:
     """Re-scan when protocol options change."""
     manager = hass.data.get(DOMAIN)
     if manager is not None:
@@ -54,4 +63,9 @@ async def _async_update_listener(
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: SetupCodesConfigEntry) -> bool:
+    # Stop new API calls before draining already-started writes. A replacement
+    # manager must not load the file until the old manager has finished with it.
+    manager = hass.data.pop(DOMAIN, None)
+    if manager is not None:
+        await manager.async_shutdown()
     return True

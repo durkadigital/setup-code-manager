@@ -1,5 +1,5 @@
 {
-  "name": "Setup Codes",
-  "homeassistant": "2025.1.0",
+  "name": "Setup Code Manager",
+  "homeassistant": "2026.1.0",
   "render_readme": true
 }

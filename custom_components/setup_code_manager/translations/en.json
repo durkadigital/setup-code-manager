@@ -2,7 +2,7 @@
   "config": {
     "step": {
       "user": {
-        "title": "Setup Codes",
+        "title": "Setup Code Manager",
         "description": "Choose which integrations to scan. You can change this later under Configure. Existing records stay if you turn a protocol off.",
         "data": {
           "scan_matter": "Scan Matter devices",
@@ -12,15 +12,15 @@
       }
     },
     "abort": {
-      "already_configured": "Setup Codes is already configured.",
-      "single_instance_allowed": "Setup Codes is already configured."
+      "already_configured": "Setup Code Manager is already configured.",
+      "single_instance_allowed": "Setup Code Manager is already configured."
     }
   },
   "options": {
     "step": {
       "init": {
         "title": "Protocols",
-        "description": "Choose which integrations Setup Codes should scan. Existing records stay in the list if you turn a protocol off; new devices of that type are not added.",
+        "description": "Choose which integrations Setup Code Manager should scan. Existing records stay in the list if you turn a protocol off; new devices of that type are not added.",
         "data": {
           "scan_matter": "Scan Matter devices",
           "scan_homekit": "Scan HomeKit devices",
