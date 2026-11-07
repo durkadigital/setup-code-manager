@@ -1,11 +1,44 @@
 # Teststand und praktische Abnahme
 
-Dieser Teststand beschreibt [0.1.0b2](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b2)
-und die getrennt dokumentierten früheren Prüfungen von **0.1.0b1**. Der Standardbranch
-`main` bleibt bei `0.1.0b1`. Automatisierte Prüfungen verwenden synthetische Daten;
-zusätzlich wurde ein reales QR-Foto ausschließlich lokal geprüft. Private Fotos
-und Codeinhalte werden nicht im Repository dokumentiert. Die vollständige praktische
-Abnahme steht aus.
+Dieser Teststand beschreibt den lokalen Entwicklungsstand **0.1.0b3**, die
+installierte [0.1.0b2](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b2)
+und die getrennt dokumentierten früheren Prüfungen von **0.1.0b1**. Veröffentlichung
+und Installation von `0.1.0b3` stehen noch aus; der Standardbranch `main` bleibt
+bei `0.1.0b1`. Automatisierte Prüfungen verwenden synthetische Daten. Zusätzlich
+wurden ein reales QR-Foto lokal und die Fotoaufnahme auf dem Ziel-iPhone geprüft.
+Private Fotos und Codeinhalte werden nicht im Repository dokumentiert.
+Die vollständige praktische Abnahme steht aus.
+
+## Lokale Prüfung von 0.1.0b3 am 7. November 2026
+
+Die Gerätedetails besitzen einen festen Kopf mit sicherem Bildschirmabstand und
+einen separat scrollbaren Inhalt. Lange Titel sind auf zwei Zeilen begrenzt;
+Standort, Modell und weitere Angaben stehen im Scrollbereich. Die Scrollposition bleibt beim Anzeigen eines
+Codes und beim Aktualisieren desselben Geräts erhalten. Schließen per Schaltfläche
+oder Escape maskiert aufgedeckte Codes und gibt den Fokus an den zugehörigen
+Listeneintrag zurück; fehlt dieser in der gefilterten Liste, erhält die Suche den
+Fokus. Ein anderes oder erneut geöffnetes Gerät beginnt oben.
+
+- **270 Python-Tests und 48 Node-Tests bestanden.** 15 neue Verhaltenstests
+  prüfen Scrollposition, Fokus und Schließen; die 33 früheren Node-Tests bleiben enthalten.
+- Browserprüfung mit 390 × 844 Pixeln und simuliertem oberen Sicherheitsabstand
+  von 59 px: Zuvor war die Detailansicht 1001 px hoch und besaß keinen nutzbaren
+  eigenen Scrollbereich. Die Schließen-Schaltfläche begann bei 18 px hinter der
+  Statusleiste. Nach der Korrektur ist die Ansicht 844 px hoch; die Schaltfläche
+  beginnt bei 71 px und der Inhalt ist bis zum Ende erreichbar.
+- Scrollen bis zum unteren Inhalt und anschließendes Schließen wurden in der
+  lokalen Browserprüfung erfolgreich ausgeführt.
+- Querformat mit 844 × 390 Pixeln und seitlichen Sicherheitsabständen von je
+  44 px: Scrollbereich und untere Aktionen erreichbar, Schließen bei 20 px.
+- Ein 1024 px breites Fenster mit 235 px HA-Seitenleiste lässt dem Panel 789 px;
+  die schmale Detailansicht greift auch bei dieser Containerbreite. Bei 1440 px
+  bleiben Geräteliste und Detailansicht nebeneinander sichtbar.
+- Ein Grenzfall mit jeweils 256 Zeichen in Name, Standort und Modell, 30 Zeilen
+  Notizen und drei Codes bleibt mit begrenztem Titel und scrollbarem Inhalt bedienbar.
+
+Diese Messung mit simulierten Insets ersetzt keine Abnahme in der iPhone-
+Companion-App. Installation und praktische Abnahme dieser Beta stehen noch aus.
+[Versionshinweise](releases/0.1.0b3.md).
 
 ## Lokale Prüfung von 0.1.0b2 am 7. November 2026
 
@@ -32,9 +65,8 @@ Abgeschlossen wurden:
   ausgewählt: **Matter-Code erkannt**, maskiertes Codefeld gefüllt. Der Entwurf
   wurde ohne Speichern verworfen.
 
-Die Aufnahme direkt auf einem iPhone und der Rückweg aus dessen Systemkamera bzw.
-der Companion-App sind damit noch nicht geprüft. Ebenso ersetzt der lokale
-Fototest keinen Scan in der HA-OS-Zielinstallation. Die unten genannten
+Der lokale Fototest belegt die Erkennung im Safari-Panel. Die anschließende
+Prüfung auf dem Ziel-iPhone ist unten getrennt dokumentiert. Die unten genannten
 **12 Node-Tests** bleiben als früherer Teststand erhalten.
 
 ## Automatisierte Prüfungen
@@ -62,7 +94,7 @@ und [Hassfest](https://github.com/durkadigital/setup-code-manager/actions/runs/4
 für den veröffentlichten Entwicklungsstand `d9a70e6` bestanden. Die HACS-Validierung
 prüft Repository-Voraussetzungen; sie bedeutet keine Aufnahme in den HACS-Katalog.
 Diese CI-Nachweise beziehen sich auf den genannten Entwicklungscommit und sind
-vom oben dokumentierten lokalen Abschlusslauf für `0.1.0b2` zu unterscheiden.
+von den oben dokumentierten lokalen Läufen für `0.1.0b2` und `0.1.0b3` zu unterscheiden.
 
 ## Isolierter Lauf mit echtem Home Assistant
 
@@ -97,7 +129,7 @@ HA-Verbindung. Ein sichtbarer Hinweis kennzeichnet Beispieldaten. Diese Vorschau
 testet Darstellung und Interaktion; sie ersetzt keine Installation in Home Assistant.
 Die Beispieldaten werden beim Neuladen zurückgesetzt.
 
-## Installationsprüfung auf Home Assistant OS
+## Frühere Installationsprüfung von 0.1.0b1 auf Home Assistant OS
 
 Am 7. November 2026 auf **HA OS 18.4 / Core 2026.11.0 / Frontend 20261028.4** geprüft:
 
@@ -109,9 +141,35 @@ Am 7. November 2026 auf **HA OS 18.4 / Core 2026.11.0 / Frontend 20261028.4** ge
 - Geräteerfassung, manuelle Eingabe und HA-Geräteauswahl mit dem voreingestellten
   Filter **Ohne Matter-Code** wurden ohne Speichern geprüft.
 
-Es wurden keine Codes gespeichert und weder Migration noch Import ausgeführt.
+In diesem Lauf wurden keine Codes gespeichert und weder Migration noch Import ausgeführt.
 Dieser Installationsnachweis belegt deshalb noch keine Codepersistenz nach Neustart,
 Export-/Import-Abnahme, echten Companion-App-Scan oder vollständige Wiederherstellung.
+
+## Prüfung von 0.1.0b2 auf dem Ziel-iPhone
+
+Am 7. November 2026 wurde **0.1.0b2** auf dem HA-OS-Zielsystem installiert. Der Nutzer
+bestätigte die Fotoaufnahme in der iPhone-Companion-App über den HTTP-Zugang.
+Der anschließend übermittelte Screenshot zeigt den erkannten und gespeicherten
+realen Gerätecode. Private Bilder und Codewerte werden nicht übernommen.
+
+Die Persistenz dieses Codes nach einem HA-Neustart wurde damit noch nicht geprüft.
+Ebenso fehlen weitere Geräte, Abbruchfälle und der Livevideo-Test über HTTPS.
+Die gemeldeten Probleme mit Schließen und Scrollen der mobilen Detailansicht
+werden mit `0.1.0b3` korrigiert; deren praktische iPhone-Abnahme steht noch aus.
+
+## Direktscan und HTTP
+
+Die vorhandene Browser-Livekamera benötigt HTTPS bzw. einen sicheren Kontext.
+Über HTTP bleibt die bestätigte System-Fotoaufnahme verfügbar. Im geprüften
+Frontend **20261028.4** und iOS **2026.10.3** bietet Home Assistant keinen unterstützten
+öffentlichen Ladeweg zum nativen Scanner für Custom Panels: Die vorhandene
+Scanner-Komponente wird nach Bedarf geladen, ihre Ergebnisverteilung ist intern.
+Ein allgemeines `show-dialog`-Ereignis lädt sie nicht selbstständig.
+Siehe [Scanner-Komponente](https://github.com/home-assistant/frontend/blob/20261028.4/src/components/ha-qr-scanner.ts),
+[Ergebnisverteilung](https://github.com/home-assistant/frontend/blob/20261028.4/src/external_app/external_app_entrypoint.ts)
+und [Dialogmanager](https://github.com/home-assistant/frontend/blob/20261028.4/src/dialogs/make-dialog-manager.ts).
+Die Integration ersetzt keine HA-Nachrichtenhandler. Netzwerkeinstellungen wurden
+nicht geändert.
 
 ## Noch erforderliche Abnahme im Zielsystem
 
@@ -124,11 +182,14 @@ Export-/Import-Abnahme, echten Companion-App-Scan oder vollständige Wiederherst
    Matter-Code auswählbar bleiben; Speichern ergänzt denselben Inventareintrag.
 3. Den Original-QR eines eigenen Geräts per Smartphone-Kamera und Bildauswahl
    erfassen. Safari/iOS, Android und gegebenenfalls die HA-Companion-App getrennt
-   prüfen. Für `0.1.0b2` insbesondere **Foto aufnehmen** und **Foto auswählen** über
-   HTTP getrennt prüfen, einschließlich Rückkehr aus dem Systemdialog, Abbruch,
+   prüfen. Die erste Fotoaufnahme auf dem Ziel-iPhone mit `0.1.0b2` ist bestätigt;
+   **Foto aufnehmen** und **Foto auswählen** über HTTP weiterhin getrennt prüfen,
+   einschließlich Rückkehr aus dem Systemdialog, Abbruch,
    erneuter Auswahl desselben Fotos und Wechsel zu manueller Eingabe. Livevideo
    über HTTPS sowie Kameraverweigerung gesondert prüfen. Titel und Schließen-Schaltfläche
    müssen auch auf Geräten mit oberem Bildschirmausschnitt erreichbar bleiben.
+   Bei `0.1.0b3` zusätzlich lange Gerätedetails bis zum Ende scrollen, einen Code
+   anzeigen und die erhaltene Scrollposition sowie Schließen und Rückkehr zur Liste prüfen.
 4. Gerät ausschließlich aus HA entfernen. Inventar, Standort, Notizen und Codes
    müssen erhalten bleiben; Status wechselt zu Nicht verknüpft. Ein Offline-Gerät
    muss hingegen verknüpft bleiben.
@@ -145,8 +206,8 @@ Export-/Import-Abnahme, echten Companion-App-Scan oder vollständige Wiederherst
    und eine spätere stabile Veröffentlichung.
 
 Offen sind außerdem die Persistenz gespeicherter Codes nach einem HA-Neustart,
-Export/Import im Zielsystem, ein vollständiger HA-Restore und reale
-Smartphone-Kamera-/Companion-App-Abnahmen. Ein automatisierter
+Export/Import im Zielsystem, ein vollständiger HA-Restore und die weiteren
+Smartphone-/Companion-App-Abnahmen einschließlich des Layouts von `0.1.0b3`. Ein automatisierter
 Decoder-Test belegt die Erkennung der Testbilder, nicht die Qualität aller realen
 Kameras, Ausdrucke und Lichtverhältnisse.
 

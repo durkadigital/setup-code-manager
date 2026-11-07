@@ -30,6 +30,14 @@ const haInitial = [
   {id:'ha-9',name:'Leselampe',location:'Schlafzimmer',manufacturer:'Philips',model:'Hue White',serial_number:'',protocols:[],integration_names:['Hue'],via_device_id:'ha-bridge',available:true},
   {id:'ha-bridge',name:'Hue Bridge',location:'Flur',manufacturer:'Philips',model:'Bridge',serial_number:'',protocols:['matter'],integration_names:['Hue','Matter'],available:true},
 ];
+// Maximum-length identity fields and long notes exercise the bounded detail pane.
+if (new URLSearchParams(location.search).get('layout-test') === 'long') {
+  initial[0].name = 'Steckdose mit sehr langem Gerätenamen '.repeat(8).slice(0, 256);
+  initial[0].location = 'Beispielraum '.repeat(24).slice(0, 256);
+  initial[0].model = 'Beispielmodell '.repeat(24).slice(0, 256);
+  initial[0].notes = 'Lange synthetische Notiz für den Scrolltest.\n'.repeat(30);
+  initial[0].codes.push(code('c-long', 'zwave', DSK));
+}
 let devices = copy(initial), haDevices = copy(haInitial), revision = 1;
 const subscribers = new Set(), previews = new Map();
 const failure = code => { throw {code,message:code}; };

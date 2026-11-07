@@ -18,9 +18,11 @@ angelegt.
 
 ## Projektstand
 
-Diese Testversion ist [0.1.0b2](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b2).
-Die [Versionshinweise](docs/releases/0.1.0b2.md) beschreiben Umfang und Grenzen;
-dies ist noch keine stabile Version. Der Standardbranch `main` bleibt beim
+Diese Testversion **0.1.0b3** ist lokal geprüft; die praktische iPhone-Abnahme
+des korrigierten Layouts steht noch aus. Die [Versionshinweise](docs/releases/0.1.0b3.md)
+beschreiben Umfang und Grenzen. Die veröffentlichte und auf dem Zielsystem
+installierte Testversion ist [0.1.0b2](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b2).
+Dies ist noch keine stabile Version. Der Standardbranch `main` bleibt beim
 bereits veröffentlichten und auf HA OS geprüften Stand **0.1.0b1**.
 Die neue Integration liegt unter `custom_components/setup_code_manager` und hat
 von der ursprünglichen Integration getrennte API-, Panel- und Speicherkennungen.
@@ -39,8 +41,8 @@ von der Abnahme im Zielsystem. Ein isolierter lokaler Lauf mit echtem HA Core is
 bestanden. Am 7. November 2026 gelangen mit **0.1.0b1** auf HA OS 18.4 / Core 2026.11.0
 Marketplace-Installation, Einrichtung und ein echter HA-Neustart; danach waren weiterhin fünf automatisch
 erkannte, verknüpfte Geräte sichtbar. Es wurden keine Codes gespeichert und keine
-Migration oder Imports ausgeführt. Reale Scans, Codepersistenz, Export und
-vollständiger Restore im Zielsystem stehen noch aus.
+Migration oder Imports ausgeführt. Dieser frühere Installationslauf prüfte noch
+keine realen Codes.
 
 Die Vorabversion **0.1.0b2** ergänzt eine
 systemeigene Fotoaufnahme für HTTP-Aufrufe, eine getrennte Auswahl vorhandener Fotos,
@@ -49,7 +51,25 @@ Vollbilddialog. Ein reales Originalfoto wurde mit der produktiven Panelkomponent
 in der lokalen Safari-Vorschau als Matter-Code erkannt und in das maskierte
 Eingabefeld übernommen; der Entwurf wurde ohne Speichern verworfen. Der lokale
 Abschlusslauf umfasst **270 Python- und 33 Node-Tests**, jeweils bestanden.
-Die Fotoaufnahme auf dem iPhone bzw. in der Companion-App bleibt gesondert abzunehmen.
+Anschließend wurde **0.1.0b2** auf dem Zielsystem installiert. Die Fotoaufnahme in
+der iPhone-Companion-App wurde vom Nutzer bestätigt; dessen Screenshot zeigt einen
+gespeicherten realen Gerätecode. Die Persistenz nach einem HA-Neustart sowie Export,
+Import und vollständiger Restore im Zielsystem sind weiterhin offen.
+
+**0.1.0b3** korrigiert die mobile Detailansicht: Der Kopf mit Schließen-Schaltfläche
+bleibt unterhalb des sicheren Bildschirmbereichs sichtbar, der Inhalt scrollt
+separat. Lange Titel sind auf zwei Zeilen begrenzt; die weiteren Geräteangaben
+stehen im Scrollbereich. Anzeigen eines Codes und Aktualisieren desselben Geräts erhalten die
+Scrollposition; Schließen per Schaltfläche oder Escape setzt den Fokus zurück
+in die Geräteliste und maskiert aufgedeckte Codes. Lokal sind **270 Python- und
+48 Node-Tests** bestanden. Browserprüfungen im Hoch- und Querformat,
+mit HA-Seitenleiste und auf dem Desktop bestätigten die Detaildarstellung.
+Scrollen bis zum Ende und erreichbares Schließen wurden geprüft; die Abnahme auf dem Ziel-iPhone
+steht aus. Diese Beta wird vom Featurebranch veröffentlicht; `main` bleibt bei `0.1.0b1`.
+
+Die vorhandene Livekamera benötigt HTTPS. Fotoaufnahme über HTTP bleibt verfügbar;
+ein unterstützter öffentlicher Ladeweg zum nativen Companion-Scanner besteht für
+Custom Panels derzeit nicht. Es wurden keine Netzwerkeinstellungen geändert.
 
 Für Tests über ein benutzerdefiniertes Repository im integrierten Marketplace von
 HA 2026.11 ist die GitHub-Vorabversion `0.1.0b2` ausdrücklich in der Versionsauswahl

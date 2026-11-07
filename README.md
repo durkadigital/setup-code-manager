@@ -2,20 +2,23 @@
 
 Geräte und Einrichtungscodes in Home Assistant verwalten, lokal scannen und sichern.
 
-**Testversion [0.1.0b2](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b2):
-verbesserte Fotoerkennung und Fotoaufnahme auf dem Smartphone.
+**Testversion [0.1.0b3](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b3): erreichbare Gerätedetails auf kleinen Bildschirmen.
+Lokal geprüft; die praktische iPhone-Abnahme dieser Beta steht noch aus.
 Noch keine stabile Version oder allgemeine Katalogaufnahme.**
-Die Beta ergänzt **Foto aufnehmen** für Aufrufe über HTTP, getrennt von der Auswahl
-vorhandener Fotos. QR-Bilder werden in mehreren Auflösungen geprüft; mobile
-Vollbilddialoge berücksichtigen den sicheren Bildschirmbereich.
+Die Detailansicht erhält einen festen Kopf mit sicherem Abstand zur Statusleiste
+und einen eigenen scrollbaren Inhalt. Lange Titel bleiben auf zwei Zeilen begrenzt;
+weitere Geräteangaben stehen im Scrollbereich. Beim Anzeigen eines Codes und bei
+Aktualisierungen bleibt die Scrollposition erhalten; Schließen führt den
+Tastaturfokus zum Gerät in der Liste zurück.
+[Änderungen und Grenzen von Beta 3](docs/releases/0.1.0b3.md).
 
-Ein reales QR-Foto wurde mit der produktiven Panelkomponente in der lokalen
-Safari-Vorschau erkannt. Die Aufnahme direkt auf dem iPhone bzw. in der
-Companion-App bleibt gesondert zu prüfen. Installation, Einrichtung und Neustart
-auf Home Assistant OS wurden am 7. November 2026 mit **0.1.0b1** geprüft; fünf
-erkannte Geräte blieben danach sichtbar. Codepersistenz, Export und Wiederherstellung
-im Zielsystem stehen noch aus ([Teststand](docs/TESTING.de.md)). Die Oberfläche ist
-auf Deutsch und Englisch verfügbar. [Änderungen und Grenzen dieser Beta](docs/releases/0.1.0b2.md).
+Die veröffentlichte [0.1.0b2](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b2)
+ist auf dem Zielsystem installiert. Am 7. November 2026 wurde die Fotoaufnahme in
+der iPhone-Companion-App bestätigt; ein realer Gerätecode wurde anschließend
+gespeichert. Die Persistenz dieses Codes nach einem HA-Neustart sowie Export und
+Wiederherstellung im Zielsystem bleiben offen ([Teststand](docs/TESTING.de.md)).
+Installation, Einrichtung und Neustart waren zuvor mit **0.1.0b1** geprüft worden.
+Die Oberfläche ist auf Deutsch und Englisch verfügbar.
 
 ## Funktionen
 
@@ -49,7 +52,7 @@ HA-Sicherung anlegen und die ursprüngliche Integration samt Daten erhalten.
 
 ### Über den Marketplace ab Home Assistant 2026.11
 
-Für diese Testversion ausdrücklich **`0.1.0b2`** auswählen. Falls sie noch nicht
+Für die Layoutkorrektur ausdrücklich **`0.1.0b3`** auswählen. Falls diese Version noch nicht
 angeboten wird, die Repository-Daten aktualisieren und die Versionsauswahl erneut
 öffnen oder die manuelle Installation unten verwenden.
 
@@ -58,7 +61,7 @@ angeboten wird, die Repository-Daten aktualisieren und die Versionsauswahl erneu
    Repository vom Typ **Integration** hinzufügen. Falls angefordert, GitHub verbinden.
 2. Die Repository-Details öffnen und **vor der Installation** die Option
    **Vorabversionen einschließen** / **Include pre-releases** aktivieren.
-3. Die angebotene Version prüfen: **Setup Code Manager**, **`0.1.0b2`**, neue
+3. Die angebotene Version prüfen: **Setup Code Manager**, **`0.1.0b3`**, neue
    Integrationskennung **`setup_code_manager`**. Wenn noch **Setup Codes** oder eine
    frühere Version angeboten wird, nicht installieren; die
    Repository-Daten aktualisieren und die Versionsauswahl erneut prüfen.
@@ -77,17 +80,18 @@ Details beschreibt die [offizielle Release-Dokumentation](https://contributors.h
 
 ### Alternativ manuell
 
-Die Version **`0.1.0b2`** auf der
+Die Version **`0.1.0b3`** auf der
 [Release-Seite](https://github.com/durkadigital/setup-code-manager/releases) auswählen
 und deren **Source code (zip)** laden. Im heruntergeladenen `manifest.json` muss
-`0.1.0b2` stehen.
+`0.1.0b3` stehen.
 
 Den vollständigen Ordner `custom_components/setup_code_manager` nach
 `<HA-Konfiguration>/custom_components/setup_code_manager` kopieren, HA neu starten
 und anschließend **Setup Code Manager** über Geräte & Dienste hinzufügen.
 Der Standardbranch `main` bleibt beim geprüften Stand **`0.1.0b1`** mit der neuen
-Domain `setup_code_manager`. Für die Verbesserungen dieser Beta die bezeichnete
-Release-Version **`0.1.0b2`** verwenden.
+Domain `setup_code_manager`. Für die veröffentlichten Scanverbesserungen die
+Release-Version **`0.1.0b3`** verwenden. Weitere Betas werden vom Featurebranch
+veröffentlicht.
 
 Die neue Domain `setup_code_manager` ist von `setup_codes` getrennt. Beide können
 zur Migration parallel installiert sein. Im neuen Panel erscheint bei vorhandener
@@ -102,10 +106,16 @@ gesonderte Aktion mit Vorschau; zuerst die neue Version prüfen.
 
 Livekamera benötigt HTTPS beziehungsweise einen sicheren Browserkontext und eine
 Kamerafreigabe. Bildauswahl und manuelle Eingabe bleiben als Alternativen verfügbar.
-Ohne verfügbare Livekamera bietet `0.1.0b2` **Foto aufnehmen** über die Fotoaufnahme
+Ohne verfügbare Livekamera bietet die App seit `0.1.0b2` **Foto aufnehmen** über die Fotoaufnahme
 des Betriebssystems an. **Foto auswählen** bleibt separat verfügbar. Welche
-Kameraauswahl erscheint, hängt vom Browser und der App ab; das Verhalten auf dem
-Ziel-iPhone ist noch zu prüfen.
+Kameraauswahl erscheint, hängt vom Browser und der App ab. Die Fotoaufnahme über
+HTTP wurde mit `0.1.0b2` in der iPhone-Companion-App bestätigt.
+
+Ein direktes Livebild über HTTP ist damit nicht verfügbar. Home Assistant bietet
+für Custom Panels derzeit keinen unterstützten Ladeweg zum nativen Companion-
+Scanner mit Ergebnisrückgabe. Die App verwendet keine privaten Nachrichtenhandler;
+Netzwerkeinstellungen werden nicht geändert. Für die vorhandene Livekamera ist ein
+gültiger HTTPS-Zugang erforderlich.
 Unterstützt werden Matter-QRs `MT:`, HomeKit-QRs `X-HM://`, Z-Wave-SmartStart-QRs und
 die jeweiligen manuellen Codes. Gedruckte Ziffern werden nicht per OCR erkannt.
 Zusammengesetzte Matter-QRs mit mehreren Payloads sowie nicht unterstützte optionale
@@ -127,8 +137,8 @@ und nicht gespeichert. Es gibt weder Analyseübertragung noch einen Cloud-Decode
 Die Integration fügt dem HA-Konfigurationsordner keine eigene Verschlüsselung hinzu.
 
 [Sicherung, Wiederherstellung und HA-Backups](docs/BACKUP.de.md) beschreibt den Umfang.
-Ein echter vollständiger HA-Backup-/Restore-Lauf sowie Kamera-/Companion-App-Tests
-auf den Zielgeräten stehen noch aus.
+Ein echter vollständiger HA-Backup-/Restore-Lauf sowie die weiteren Kamera- und
+Gerätetests aus dem Abnahmeplan stehen noch aus.
 
 ## Entwicklung
 
