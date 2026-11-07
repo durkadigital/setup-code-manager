@@ -1,0 +1,51 @@
+{
+  "status": "passed",
+  "stage": "completed",
+  "checks": {
+    "normal_component_setup": true,
+    "http_frontend_api_loaded": true,
+    "config_flow_entry_loaded": true,
+    "anonymous_api_denied": true,
+    "panel_requires_admin": true,
+    "static_assets_http_200": [
+      "panel.js",
+      "panel.css",
+      "scanner.js",
+      "i18n.js",
+      "icons.js",
+      "vendor/jsQR.js",
+      "qr.js"
+    ],
+    "admin_save_and_export": true,
+    "regular_user_api_denied": true,
+    "unload_reload_preserves_record": true,
+    "single_instance_guard": true,
+    "runtime_stopped": true,
+    "temporary_config_removed": true,
+    "loopback_port_closed": true
+  },
+  "tested_at_utc": "2026-11-07T10:42:35.202959+00:00",
+  "homeassistant": "2026.11.0",
+  "frontend": "20261028.4",
+  "python": "3.14.4",
+  "platform": "darwin",
+  "source_sha256": "94a7f46072700dd7bb4726ac7e3b659dcd9d7371f97f2d4dc363a7ecb149e018",
+  "bind_host": "127.0.0.1",
+  "scope": "Isolated local HA Core with synthetic data; no HA OS, real devices, camera, or full restore tested.",
+  "runtime_package_installation": false,
+  "unrelated_bootstrap_failures": [
+    "ai_task",
+    "analytics",
+    "assist_pipeline",
+    "assist_satellite",
+    "camera",
+    "conversation",
+    "ffmpeg",
+    "image_processing",
+    "infrared",
+    "radio_frequency",
+    "tts"
+  ],
+  "integration_error_log_count": 0,
+  "source_unchanged_during_test": true
+}

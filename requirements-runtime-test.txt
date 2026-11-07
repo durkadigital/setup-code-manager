@@ -1,0 +1,4 @@
+# Optional full HTTP/frontend smoke test; not required by the normal pytest suite.
+-r requirements-test.txt
+# Exact frontend version required by homeassistant==2026.11.0.
+home-assistant-frontend==20261028.4

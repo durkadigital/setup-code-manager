@@ -2,9 +2,11 @@
 
 Geräte und Einrichtungscodes in Home Assistant verwalten, lokal scannen und sichern.
 
-**Stand: erste lokale Entwicklungsversion 0.1.0. Noch kein veröffentlichtes Release
-und noch kein Eintrag im HACS-Katalog.** Die praktische Abnahme in einer eigenen
-HA-Testinstallation steht aus. Die Oberfläche ist auf Deutsch und Englisch verfügbar.
+**Stand: Entwicklungsversion 0.1.0 auf dem Branch `feature/first-version`.
+Noch kein veröffentlichtes Release und noch kein Eintrag im HACS-Katalog.**
+Automatisierte Tests und ein isolierter Lauf mit echtem Home Assistant sind bestanden.
+Die praktische Abnahme mit eigenen Geräten steht aus. Die Oberfläche ist auf Deutsch
+und Englisch verfügbar.
 
 ## Funktionen
 
@@ -35,8 +37,10 @@ Vorgesehen für Home Assistant ab 2026.1; die aktuelle automatisierte Testumgebu
 verwendet **Home Assistant 2026.11.0 / Python 3.14**. Ältere unterstützte HA-Stände
 sind noch nicht praktisch abgenommen.
 
-1. Den vollständigen Ordner `custom_components/setup_code_manager` aus dieser
-   Arbeitskopie nach `<HA-Konfiguration>/custom_components/setup_code_manager` kopieren.
+1. Den [Entwicklungsbranch](https://github.com/durkadigital/setup-code-manager/tree/feature/first-version)
+   öffnen und über **Code → Download ZIP** herunterladen, oder die aktuelle lokale
+   Arbeitskopie verwenden. Den vollständigen Ordner `custom_components/setup_code_manager`
+   nach `<HA-Konfiguration>/custom_components/setup_code_manager` kopieren.
 2. Home Assistant neu starten.
 3. Unter **Einstellungen → Geräte & Dienste → Integration hinzufügen** nach
    **Setup Code Manager** suchen und die gewünschten Geräteintegrationen wählen.
@@ -48,9 +52,15 @@ zur Migration parallel installiert sein. Im neuen Panel erscheint bei vorhandene
 Originaldatei die Übernahmefunktion. Nach der Übernahme verändert eine Bearbeitung
 in einer der beiden Apps die andere Liste nicht.
 
-Nach Veröffentlichung kann dieses Repository als **benutzerdefiniertes HACS-Repository
-vom Typ Integration** eingebunden werden. Das ist von einer Aufnahme in den
-allgemeinen HACS-Katalog zu unterscheiden; diese ist noch nicht beantragt.
+**Diese Testversion bitte noch manuell installieren.** Der Standardbranch `main`
+enthält derzeit den früheren Konzeptstand samt ursprünglicher Integration. Die
+normale HACS-Auswahl bietet Releases bzw. den Standardbranch und ist daher noch
+nicht der Installationsweg für `feature/first-version`.
+
+Nach Übernahme der geprüften Version in den Standardbranch bzw. Veröffentlichung
+kann dieses Repository als **benutzerdefiniertes HACS-Repository vom Typ Integration**
+eingebunden werden. Das ist von einer Aufnahme in den allgemeinen HACS-Katalog zu
+unterscheiden; diese ist noch nicht beantragt.
 
 ## Scan, Import und Sicherung
 
@@ -86,8 +96,8 @@ auf den Zielgeräten stehen noch aus.
 python3.14 -m venv .venv
 .venv/bin/python -m pip install -r requirements-test.txt
 .venv/bin/python -m pytest -q
-.venv/bin/ruff check custom_components tests
-.venv/bin/ruff format --check custom_components tests
+.venv/bin/ruff check custom_components tests dev/smoke_ha.py
+.venv/bin/ruff format --check custom_components tests dev/smoke_ha.py
 node --test tests/*.test.mjs
 python3 -m http.server 8765 --bind 127.0.0.1
 ```
@@ -96,6 +106,19 @@ Die lokale Oberflächenvorschau liegt unter `http://127.0.0.1:8765/dev/`.
 Sie nutzt dieselbe Web-Komponente mit ausdrücklich gekennzeichneten Beispieldaten
 und einer simulierten HA-Verbindung. Ihr Zustand bleibt nur im Arbeitsspeicher.
 Sie belegt keinen Test in einer laufenden HA-Installation.
+
+Zusätzlich lässt sich der echte HTTP-/WebSocket-Lauf lokal wiederholen:
+
+```sh
+.venv/bin/python -m pip install -r requirements-runtime-test.txt
+.venv/bin/python dev/smoke_ha.py
+```
+
+Dieser optionale Test startet HA Core ausschließlich auf `127.0.0.1` mit einer
+temporären Konfiguration und synthetischen Benutzern. Er prüft Einrichtung,
+Adminschutz, Web-Dateien, Speichern, Export und Datenerhalt beim Neuladen, beendet
+anschließend HA und entfernt die Testdaten. Das Ergebnis liegt unter
+`dist/runtime-smoke.json`. Details und Grenzen stehen im [Teststand](docs/TESTING.de.md).
 
 ## Projekt und Herkunft
 

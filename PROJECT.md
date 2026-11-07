@@ -18,7 +18,7 @@ angelegt.
 
 ## Projektstand
 
-Erste lokale Entwicklungsversion **0.1.0** auf Branch `feature/first-version`.
+Erste Entwicklungsversion **0.1.0**, lokal und auf GitHub unter Branch `feature/first-version`.
 Die neue Integration liegt unter `custom_components/setup_code_manager` und hat
 von der ursprünglichen Integration getrennte API-, Panel- und Speicherkennungen.
 Grundlage bleibt [PhantomPhoton/Setup-Codes](https://github.com/PhantomPhoton/Setup-Codes),
@@ -32,7 +32,9 @@ Vorschau zur Übernahme alter Daten. Die Integration schreibt atomar unter
 
 [Prüfungen und offene praktische Abnahme](docs/TESTING.de.md) sowie
 [Sicherung und Wiederherstellung](docs/BACKUP.de.md) trennen den lokalen Teststand
-von einer tatsächlichen HA-Installation. Noch kein veröffentlichtes Release,
+von der Abnahme im Zielsystem. Ein isolierter lokaler Lauf mit echtem HA Core ist
+bestanden; echte Geräte, Smartphonekamera und vollständiger Restore stehen aus.
+Noch kein veröffentlichtes Release,
 keine produktive Installation und keine HACS-Katalogaufnahme.
 
 ## Konzeptunterlagen

@@ -22,6 +22,6 @@ jobs:
           node-version: '22'
       - run: python -m pip install -r requirements-test.txt
       - run: python -m pytest -q
-      - run: ruff check custom_components tests
-      - run: ruff format --check custom_components tests
+      - run: ruff check custom_components tests dev/smoke_ha.py
+      - run: ruff format --check custom_components tests dev/smoke_ha.py
       - run: node --test tests/*.test.mjs

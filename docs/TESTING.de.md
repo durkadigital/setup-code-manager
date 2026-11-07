@@ -21,9 +21,37 @@ Besonders abgedeckt:
 - Adminschutz aller API-Befehle; Fehler und Änderungsereignisse ohne Codeinhalte.
 - QR-Pixeldaten einschließlich invertierter/gedrehter Bilder; Kamera-/Fotoressourcen nach Abbruch freigeben.
 
-Die lokalen Befehle stehen in der [README](../README.md). Die GitHub-Workflows sind
-vorbereitet; ein lokales Testergebnis ist kein Nachweis eines erfolgreichen
-GitHub-Actions-Laufs oder einer HACS-Katalogprüfung.
+Die lokalen Befehle stehen in der [README](../README.md). Auf GitHub sind auch die
+[Tests](https://github.com/durkadigital/setup-code-manager/actions/runs/42364597060)
+und [Hassfest](https://github.com/durkadigital/setup-code-manager/actions/runs/42364597053)
+für den veröffentlichten Entwicklungsstand `d9a70e6` bestanden. Die HACS-Validierung
+prüft Repository-Voraussetzungen; sie bedeutet keine Aufnahme in den HACS-Katalog.
+
+## Isolierter Lauf mit echtem Home Assistant
+
+`dev/smoke_ha.py` startet Home Assistant Core 2026.11.0 mit dem dazugehörigen
+Frontend 20261028.4 und temporärer Konfiguration auf `127.0.0.1`. Der Test verwendet
+synthetische Administrator-/Standardbenutzer und einen automatisch gewählten Port.
+Er nutzt weder eine vorhandene HA-Konfiguration noch echte Zugangsdaten. Zusätzliche
+Pakete werden während dieses Laufs nicht automatisch nachinstalliert.
+
+Der Lauf am 7. November 2026 bestand **13 Prüfungen**: Integration und Frontend
+normal einrichten, Config-Flow abschließen, sieben Web-Dateien per HTTP abrufen,
+anonymen sowie unberechtigten API-Zugriff abweisen, als Administrator speichern und
+exportieren, Daten beim Entladen/Neuladen behalten und eine zweite Einrichtung
+verhindern. Anschließend wurden HA beendet, die temporären Dateien entfernt und
+der geschlossene Port geprüft. Es gab keine Fehlerprotokolle unserer Integration.
+
+Der [Ergebnisbericht](testing/runtime-smoke-2026-11-07.json) enthält Versionen,
+Prüfergebnisse und einen Hash der getesteten Integrationsdateien. In der minimalen
+Python-Testumgebung fehlen Abhängigkeiten einiger fremder optionaler HA-Komponenten,
+etwa Kamera, Sprachassistent und Analytics; deren Startfehler stehen ausdrücklich
+im Bericht. Unsere Integration sowie HTTP, Frontend und API wurden erfolgreich geladen.
+Dieser Test ist keine HA-OS-, Smartphone-, Geräte- oder vollständige Restore-Abnahme.
+
+Installation und Aufruf stehen in der README unter Entwicklung. Der zusätzliche
+Frontend-Download gehört nur zur optionalen `requirements-runtime-test.txt`, nicht
+zur normalen Unit-Testumgebung.
 
 ## Oberfläche
 
