@@ -1,8 +1,41 @@
 # Teststand und praktische Abnahme
 
-Test-Vorabversion 0.1.0b1, 7. November 2026. Ausschließlich synthetische Testdaten.
-Die Vorbereitung und lokale Prüfung dieser Version belegen noch keine Installation
-oder Abnahme in einer eigenen HA-OS-Umgebung.
+Dieser Teststand beschreibt [0.1.0b2](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b2)
+und die getrennt dokumentierten früheren Prüfungen von **0.1.0b1**. Der Standardbranch
+`main` bleibt bei `0.1.0b1`. Automatisierte Prüfungen verwenden synthetische Daten;
+zusätzlich wurde ein reales QR-Foto ausschließlich lokal geprüft. Private Fotos
+und Codeinhalte werden nicht im Repository dokumentiert. Die vollständige praktische
+Abnahme steht aus.
+
+## Lokale Prüfung von 0.1.0b2 am 7. November 2026
+
+Diese Beta ergänzt:
+
+- **Foto aufnehmen** über den Systemdialog bei HTTP-Aufrufen sowie eine separate
+  Auswahl vorhandener Fotos. Der Livevideo-Zugriff benötigt weiterhin einen sicheren
+  Browserkontext und eine Kamerafreigabe.
+- QR-Erkennung mit mehreren Bildauflösungen und begrenzten Erkennungsversuchen.
+- Abstände mobiler Vollbilddialoge unter Berücksichtigung der HA-/Companion-App-Insets.
+
+Die Bildvorbereitung verwendet zuerst ein HTML-Bildelement; `ImageBitmap` dient
+nur als Rückfall beim Öffnungsfehler. Für die QR-Erkennung werden Bildgrößen mit
+maximal 2400, 1200 und 600 Pixeln Kantenlänge geprüft. Damit wird das Originalfoto
+auch im Safari-Panel korrekt verarbeitet.
+
+Abgeschlossen wurden:
+
+- **270 Python-Tests** und **33 Node-Tests** bestanden; darunter 20 Scanner- und
+  13 Paneltests.
+- Ruff-Codeprüfung, Ruff-Formatprüfung, JavaScript-Syntaxprüfung und
+  Git-Whitespace-Prüfung bestanden.
+- Reales Original-JPEG in der produktiven Panelkomponente der lokalen Safari-Vorschau
+  ausgewählt: **Matter-Code erkannt**, maskiertes Codefeld gefüllt. Der Entwurf
+  wurde ohne Speichern verworfen.
+
+Die Aufnahme direkt auf einem iPhone und der Rückweg aus dessen Systemkamera bzw.
+der Companion-App sind damit noch nicht geprüft. Ebenso ersetzt der lokale
+Fototest keinen Scan in der HA-OS-Zielinstallation. Die unten genannten
+**12 Node-Tests** bleiben als früherer Teststand erhalten.
 
 ## Automatisierte Prüfungen
 
@@ -28,8 +61,8 @@ Die lokalen Befehle stehen in der [README](../README.md). Auf GitHub sind auch d
 und [Hassfest](https://github.com/durkadigital/setup-code-manager/actions/runs/42364597053)
 für den veröffentlichten Entwicklungsstand `d9a70e6` bestanden. Die HACS-Validierung
 prüft Repository-Voraussetzungen; sie bedeutet keine Aufnahme in den HACS-Katalog.
-Diese CI-Nachweise beziehen sich auf den genannten Entwicklungscommit; ein neuer
-GitHub-Actions-Lauf für die Beta ist gesondert zu prüfen.
+Diese CI-Nachweise beziehen sich auf den genannten Entwicklungscommit und sind
+vom oben dokumentierten lokalen Abschlusslauf für `0.1.0b2` zu unterscheiden.
 
 ## Isolierter Lauf mit echtem Home Assistant
 
@@ -64,22 +97,38 @@ HA-Verbindung. Ein sichtbarer Hinweis kennzeichnet Beispieldaten. Diese Vorschau
 testet Darstellung und Interaktion; sie ersetzt keine Installation in Home Assistant.
 Die Beispieldaten werden beim Neuladen zurückgesetzt.
 
+## Installationsprüfung auf Home Assistant OS
+
+Am 7. November 2026 auf **HA OS 18.4 / Core 2026.11.0 / Frontend 20261028.4** geprüft:
+
+- Marketplace-Installation von **Setup Code Manager 0.1.0b1**, Autor `durkadigital`,
+  Installationsverzeichnis `setup_code_manager`.
+- Einrichtung über den Config-Flow erfolgreich; das Administrator-Panel zeigte
+  fünf automatisch erkannte, verknüpfte Geräte.
+- Ein echter HA-Neustart wurde abgeschlossen; danach waren weiterhin fünf Einträge sichtbar.
+- Geräteerfassung, manuelle Eingabe und HA-Geräteauswahl mit dem voreingestellten
+  Filter **Ohne Matter-Code** wurden ohne Speichern geprüft.
+
+Es wurden keine Codes gespeichert und weder Migration noch Import ausgeführt.
+Dieser Installationsnachweis belegt deshalb noch keine Codepersistenz nach Neustart,
+Export-/Import-Abnahme, echten Companion-App-Scan oder vollständige Wiederherstellung.
+
 ## Noch erforderliche Abnahme im Zielsystem
 
-1. Nach Veröffentlichung `0.1.0b1` über das benutzerdefinierte Repository im
-   Marketplace installieren: **Vorabversionen vor der Installation einschließen**,
-   anschließend **Setup Code Manager**, Version **0.1.0b1** und Domain
-   **setup_code_manager** prüfen. Alternativ die exakt geprüfte Version manuell
-   kopieren. Anleitung: [Testinstallation](../README.md#testinstallation).
-   Einen angeforderten HA-Neustart ausführen und die Integration über Geräte &
-   Dienste hinzufügen. Die ursprüngliche Integration und ihre Daten erhalten.
-   Als Administrator öffnen; als normaler Benutzer darf kein Zugriff auf die Codes bestehen.
+1. Zugriff als normaler Benutzer im Zielsystem prüfen: Es darf kein Zugriff auf
+   die Codes bestehen. Für weitere Installationen gilt die
+   [Testinstallation](../README.md#testinstallation); die ursprüngliche Integration
+   und ihre Daten bleiben erhalten.
 2. Geräte mit Matter und HomeKit sowie ein offline geschaltetes Gerät vorbereiten.
    Bei Matter-Erfassung muss ein Gerät mit gespeichertem HomeKit-Code und fehlendem
    Matter-Code auswählbar bleiben; Speichern ergänzt denselben Inventareintrag.
 3. Den Original-QR eines eigenen Geräts per Smartphone-Kamera und Bildauswahl
    erfassen. Safari/iOS, Android und gegebenenfalls die HA-Companion-App getrennt
-   prüfen. Kameraverweigerung, Abbruch, HTTPS und manuelle Alternative prüfen.
+   prüfen. Für `0.1.0b2` insbesondere **Foto aufnehmen** und **Foto auswählen** über
+   HTTP getrennt prüfen, einschließlich Rückkehr aus dem Systemdialog, Abbruch,
+   erneuter Auswahl desselben Fotos und Wechsel zu manueller Eingabe. Livevideo
+   über HTTPS sowie Kameraverweigerung gesondert prüfen. Titel und Schließen-Schaltfläche
+   müssen auch auf Geräten mit oberem Bildschirmausschnitt erreichbar bleiben.
 4. Gerät ausschließlich aus HA entfernen. Inventar, Standort, Notizen und Codes
    müssen erhalten bleiben; Status wechselt zu Nicht verknüpft. Ein Offline-Gerät
    muss hingegen verknüpft bleiben.
@@ -95,12 +144,13 @@ Die Beispieldaten werden beim Neuladen zurückgesetzt.
    durchführen. Die Ergebnisse der Vorabversion entscheiden über weitere Betas
    und eine spätere stabile Veröffentlichung.
 
-Nicht durchgeführt sind bislang eine produktive Installation, ein vollständiger
-HA-Restore und reale Smartphone-Kamera-/Companion-App-Abnahmen. Ein automatisierter
+Offen sind außerdem die Persistenz gespeicherter Codes nach einem HA-Neustart,
+Export/Import im Zielsystem, ein vollständiger HA-Restore und reale
+Smartphone-Kamera-/Companion-App-Abnahmen. Ein automatisierter
 Decoder-Test belegt die Erkennung der Testbilder, nicht die Qualität aller realen
 Kameras, Ausdrucke und Lichtverhältnisse.
 
-## Ergebnis der lokalen Prüfung am 7. November 2026
+## Ergebnis der früheren lokalen Prüfung am 7. November 2026
 
 - **270 Python-Tests bestanden**, einschließlich realer HA-Registry-, API- und
   Lifecycle-Helfer; fünf Warnungen stammen aus HA-Abhängigkeiten.

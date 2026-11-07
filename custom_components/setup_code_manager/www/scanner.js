@@ -5,6 +5,7 @@ const MAX_FILE_BYTES = 20 * 1024 * 1024;
 const MAX_IMAGE_PIXELS = 40_000_000;
 const MAX_IMAGE_SIDE = 16_000;
 const PHOTO_SCAN_SIDE = 2400;
+const PHOTO_SCAN_SCALES = [1, 0.5, 0.25];
 const CAMERA_SCAN_SIDE = 1280;
 const FRAME_INTERVAL_MS = 180;
 
@@ -77,9 +78,8 @@ function cameraError(error) {
   return new ScannerError("camera_failed");
 }
 
-function drawingSurface(document, source, width, height, maxSide) {
+function drawingSurface(canvas, source, width, height, maxSide) {
   const scale = Math.min(1, maxSide / Math.max(width, height));
-  const canvas = document.createElement("canvas");
   canvas.width = Math.max(1, Math.round(width * scale));
   canvas.height = Math.max(1, Math.round(height * scale));
   const context = canvas.getContext("2d", { willReadFrequently: true });
@@ -199,24 +199,41 @@ export async function startScanner(video, onResult, onError, { signal } = {}) {
 }
 
 async function openImage(file) {
+  // Safari can render a photo differently through ImageBitmap, making an
+  // otherwise readable QR fail. Prefer the image element and retain a bitmap
+  // fallback for formats the image element cannot open.
+  if (typeof globalThis.Image === "function") {
+    try {
+      return await openImageElement(file);
+    } catch {
+      // The image element has already released its URL before fallback.
+    }
+  }
   if (typeof globalThis.createImageBitmap === "function") {
     try {
       const bitmap = await globalThis.createImageBitmap(file, { imageOrientation: "from-image" });
       return { source: bitmap, width: bitmap.width, height: bitmap.height, close: () => bitmap.close() };
     } catch {
-      // Safari/HEIF support varies. The native image element is the fallback.
+      // Format support varies between browser decoding paths.
     }
   }
+  throw new ScannerError("image_unreadable");
+}
+
+async function openImageElement(file) {
   const url = URL.createObjectURL(file);
-  const img = new Image();
+  let img;
   let timer;
   const close = () => {
     clearTimeout(timer);
-    img.onload = img.onerror = null;
-    img.removeAttribute("src");
+    if (img) {
+      img.onload = img.onerror = null;
+      img.removeAttribute("src");
+    }
     URL.revokeObjectURL(url);
   };
   try {
+    img = new Image();
     await new Promise((resolve, reject) => {
       timer = setTimeout(() => reject(new ScannerError("image_unreadable")), 15_000);
       img.onload = () => { clearTimeout(timer); resolve(); };
@@ -236,7 +253,11 @@ async function openImage(file) {
 }
 
 /** Decode a user-selected photo locally without uploading or keeping the image. */
-export async function scanImage(file) {
+export async function scanImage(file, { signal } = {}) {
+  const checkCancelled = () => {
+    if (signal?.aborted) throw new ScannerError("cancelled");
+  };
+  checkCancelled();
   if (!file || !Number.isFinite(file.size) || file.size <= 0) throw new ScannerError("image_unreadable");
   if (file.size > MAX_FILE_BYTES) throw new ScannerError("image_too_large");
   const imageType = /^(image\/(jpeg|png|webp|gif|avif|heic|heif|heic-sequence|heif-sequence))$/i;
@@ -248,14 +269,31 @@ export async function scanImage(file) {
   let canvas;
   try {
     image = await openImage(file);
+    checkCancelled();
     const { width, height } = image;
     if (!width || !height) throw new ScannerError("image_unreadable");
     if (width > MAX_IMAGE_SIDE || height > MAX_IMAGE_SIDE || width * height > MAX_IMAGE_PIXELS) {
       throw new ScannerError("image_too_large");
     }
-    const surface = drawingSurface(document, image.source, width, height, PHOTO_SCAN_SIDE);
-    canvas = surface.canvas;
-    return decodeImageData(surface.context.getImageData(0, 0, canvas.width, canvas.height));
+    canvas = document.createElement("canvas");
+    const maxSide = Math.min(PHOTO_SCAN_SIDE, Math.max(width, height));
+    let unsupported = false;
+    // Printed texture can confuse the decoder at a single resolution. Try three
+    // bounded scales from the original image, reusing one canvas. Yield between
+    // passes so a busy indicator can paint and closing the dialog can cancel.
+    for (const scale of PHOTO_SCAN_SCALES) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      checkCancelled();
+      const surface = drawingSurface(canvas, image.source, width, height, maxSide * scale);
+      try {
+        return decodeImageData(surface.context.getImageData(0, 0, canvas.width, canvas.height));
+      } catch (error) {
+        if (error.code !== "qr_not_found" && error.code !== "unsupported_code") throw error;
+        unsupported ||= error.code === "unsupported_code";
+      }
+    }
+    checkCancelled();
+    throw new ScannerError(unsupported ? "unsupported_code" : "qr_not_found");
   } catch (error) {
     throw error instanceof ScannerError ? error : new ScannerError("image_unreadable");
   } finally {

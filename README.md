@@ -2,11 +2,20 @@
 
 Geräte und Einrichtungscodes in Home Assistant verwalten, lokal scannen und sichern.
 
-**Stand: erste Test-Vorabversion 0.1.0b1 auf dem Branch `feature/first-version`.
-Für die praktische Abnahme, noch keine stabile Version oder allgemeine Katalogaufnahme.**
-Automatisierte Tests und ein isolierter Lauf mit echtem Home Assistant sind bestanden.
-Die praktische Abnahme mit eigenen Geräten steht aus. Die Oberfläche ist auf Deutsch
-und Englisch verfügbar. [Änderungen und Grenzen dieser Vorabversion](docs/releases/0.1.0b1.md).
+**Testversion [0.1.0b2](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b2):
+verbesserte Fotoerkennung und Fotoaufnahme auf dem Smartphone.
+Noch keine stabile Version oder allgemeine Katalogaufnahme.**
+Die Beta ergänzt **Foto aufnehmen** für Aufrufe über HTTP, getrennt von der Auswahl
+vorhandener Fotos. QR-Bilder werden in mehreren Auflösungen geprüft; mobile
+Vollbilddialoge berücksichtigen den sicheren Bildschirmbereich.
+
+Ein reales QR-Foto wurde mit der produktiven Panelkomponente in der lokalen
+Safari-Vorschau erkannt. Die Aufnahme direkt auf dem iPhone bzw. in der
+Companion-App bleibt gesondert zu prüfen. Installation, Einrichtung und Neustart
+auf Home Assistant OS wurden am 7. November 2026 mit **0.1.0b1** geprüft; fünf
+erkannte Geräte blieben danach sichtbar. Codepersistenz, Export und Wiederherstellung
+im Zielsystem stehen noch aus ([Teststand](docs/TESTING.de.md)). Die Oberfläche ist
+auf Deutsch und Englisch verfügbar. [Änderungen und Grenzen dieser Beta](docs/releases/0.1.0b2.md).
 
 ## Funktionen
 
@@ -40,18 +49,18 @@ HA-Sicherung anlegen und die ursprüngliche Integration samt Daten erhalten.
 
 ### Über den Marketplace ab Home Assistant 2026.11
 
-Dieser Weg setzt eine **veröffentlichte GitHub-Vorabversion `0.1.0b1`** voraus.
-Ein Entwicklungsbranch allein genügt nicht. Solange die Vorabversion nicht angeboten
-wird, die manuelle Installation unten verwenden.
+Für diese Testversion ausdrücklich **`0.1.0b2`** auswählen. Falls sie noch nicht
+angeboten wird, die Repository-Daten aktualisieren und die Versionsauswahl erneut
+öffnen oder die manuelle Installation unten verwenden.
 
 1. **Einstellungen → Marketplace** öffnen und das Repository
    `https://github.com/durkadigital/setup-code-manager` als benutzerdefiniertes
    Repository vom Typ **Integration** hinzufügen. Falls angefordert, GitHub verbinden.
 2. Die Repository-Details öffnen und **vor der Installation** die Option
    **Vorabversionen einschließen** / **Include pre-releases** aktivieren.
-3. Die angebotene Version prüfen: **Setup Code Manager**, **`0.1.0b1`**, neue
-   Integrationskennung **`setup_code_manager`**. Wenn noch **Setup Codes**, eine
-   frühere Version oder nur **`main`** angeboten wird, nicht installieren; die
+3. Die angebotene Version prüfen: **Setup Code Manager**, **`0.1.0b2`**, neue
+   Integrationskennung **`setup_code_manager`**. Wenn noch **Setup Codes** oder eine
+   frühere Version angeboten wird, nicht installieren; die
    Repository-Daten aktualisieren und die Versionsauswahl erneut prüfen.
 4. Die Vorabversion installieren und einen vom Marketplace angeforderten
    Home-Assistant-Neustart ausführen.
@@ -68,17 +77,17 @@ Details beschreibt die [offizielle Release-Dokumentation](https://contributors.h
 
 ### Alternativ manuell
 
-Die veröffentlichte Version **`0.1.0b1`** auf der
+Die Version **`0.1.0b2`** auf der
 [Release-Seite](https://github.com/durkadigital/setup-code-manager/releases) auswählen
-und deren **Source code (zip)** laden. Vor der Veröffentlichung kann die geprüfte
-lokale Arbeitskopie beziehungsweise der
-[Entwicklungsbranch](https://github.com/durkadigital/setup-code-manager/tree/feature/first-version)
-verwendet werden. Im heruntergeladenen `manifest.json` muss `0.1.0b1` stehen.
+und deren **Source code (zip)** laden. Im heruntergeladenen `manifest.json` muss
+`0.1.0b2` stehen.
 
 Den vollständigen Ordner `custom_components/setup_code_manager` nach
 `<HA-Konfiguration>/custom_components/setup_code_manager` kopieren, HA neu starten
 und anschließend **Setup Code Manager** über Geräte & Dienste hinzufügen.
-Das GitHub-Archiv des Standardbranchs `main` ist derzeit nicht dieser Teststand.
+Der Standardbranch `main` bleibt beim geprüften Stand **`0.1.0b1`** mit der neuen
+Domain `setup_code_manager`. Für die Verbesserungen dieser Beta die bezeichnete
+Release-Version **`0.1.0b2`** verwenden.
 
 Die neue Domain `setup_code_manager` ist von `setup_codes` getrennt. Beide können
 zur Migration parallel installiert sein. Im neuen Panel erscheint bei vorhandener
@@ -93,6 +102,10 @@ gesonderte Aktion mit Vorschau; zuerst die neue Version prüfen.
 
 Livekamera benötigt HTTPS beziehungsweise einen sicheren Browserkontext und eine
 Kamerafreigabe. Bildauswahl und manuelle Eingabe bleiben als Alternativen verfügbar.
+Ohne verfügbare Livekamera bietet `0.1.0b2` **Foto aufnehmen** über die Fotoaufnahme
+des Betriebssystems an. **Foto auswählen** bleibt separat verfügbar. Welche
+Kameraauswahl erscheint, hängt vom Browser und der App ab; das Verhalten auf dem
+Ziel-iPhone ist noch zu prüfen.
 Unterstützt werden Matter-QRs `MT:`, HomeKit-QRs `X-HM://`, Z-Wave-SmartStart-QRs und
 die jeweiligen manuellen Codes. Gedruckte Ziffern werden nicht per OCR erkannt.
 Zusammengesetzte Matter-QRs mit mehreren Payloads sowie nicht unterstützte optionale

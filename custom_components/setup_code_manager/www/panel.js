@@ -52,7 +52,7 @@ class SetupCodeManagerPanel extends HTMLElement {
     this._connected = false; this._started = false; this._loadSequence++; this._dialogGeneration++; this._draft = null; this._modal = null; this._busy = false;
     this._unsubscribe?.(); this._unsubscribe = null;
     clearTimeout(this._eventTimer); clearTimeout(this._toastTimer);
-    this._stopCamera();
+    this._stopCamera(); this._photoController?.abort(); this._photoController = null; this._readingPhoto = false;
     this.shadowRoot.querySelector('dialog')?.close();
   }
   async _start() {
@@ -89,14 +89,15 @@ class SetupCodeManagerPanel extends HTMLElement {
     }
   }
   _errorText(error, fallback = 'saveFailed') {
-    const map = { conflict:'revisionConflict', device_removed:'deviceRemoved', duplicate_link:'duplicateLink', archived_target:'archivedTarget', invalid_code:'invalidCode', validation_error:'validationError', unauthorized:'accessDenied', not_allowed:'accessDenied', forbidden:'accessDenied', save_failed:'saveFailed', not_loaded:'loadFailed', insecure_context:'cameraSecure', camera_denied:'cameraDenied', camera_unavailable:'cameraMissing', unsupported_code:'unsupportedQR', image_too_large:'imageTooLarge', preview_expired:'previewExpired' };
+    const map = { conflict:'revisionConflict', device_removed:'deviceRemoved', duplicate_link:'duplicateLink', archived_target:'archivedTarget', invalid_code:'invalidCode', validation_error:'validationError', unauthorized:'accessDenied', not_allowed:'accessDenied', forbidden:'accessDenied', save_failed:'saveFailed', not_loaded:'loadFailed', insecure_context:'cameraSecure', camera_denied:'cameraDenied', camera_unavailable:'cameraMissing', unsupported_code:'unsupportedQR', image_too_large:'imageTooLarge', image_unreadable:'imageUnreadable', unsupported_image:'unsupportedImage', decoder_unavailable:'decoderMissing', preview_expired:'previewExpired' };
     return this._t(map[error?.code] || fallback);
   }
+  _busyBlocks(action) { return this._busy && !(this._readingPhoto && action === 'close-modal'); }
   _button(action, label, image = '', style = '', attrs = '') {
-    return `<button type="button" class="button ${style}" data-action="${action}" ${attrs} ${this._busy ? 'disabled' : ''}>${image ? icon(image) : ''}${esc(label)}</button>`;
+    return `<button type="button" class="button ${style}" data-action="${action}" ${attrs} ${this._busyBlocks(action) ? 'disabled' : ''}>${image ? icon(image) : ''}${esc(label)}</button>`;
   }
   _iconButton(action, label, image, attrs = '') {
-    return `<button type="button" class="icon-button" data-action="${action}" title="${esc(label)}" aria-label="${esc(label)}" ${attrs} ${this._busy ? 'disabled' : ''}>${icon(image)}</button>`;
+    return `<button type="button" class="icon-button" data-action="${action}" title="${esc(label)}" aria-label="${esc(label)}" ${attrs} ${this._busyBlocks(action) ? 'disabled' : ''}>${icon(image)}</button>`;
   }
   _notice(text, style = '', extra = '') { return `<div class="notice ${style}" ${style === 'error' ? 'role="alert"' : ''}>${icon(style === 'success' ? 'check' : style === 'error' || style === 'warning' ? 'warning' : 'info')}<div class="grow">${esc(text)}${extra}</div></div>`; }
   _toast(message) {
@@ -166,9 +167,12 @@ class SetupCodeManagerPanel extends HTMLElement {
     this._renderModal();
   }
   _closeModal(force = false) {
-    if (this._busy) return;
-    if (!force && this._draft && this._dirty && ['editor','picker','choose-record','code-conflict','scanner','start','revision','duplicate'].includes(this._modal?.kind) && !window.confirm(this._t('discard'))) return;
-    this._dialogGeneration++; this._stopCamera(); this.shadowRoot.querySelector('dialog')?.close();
+    if (this._busyBlocks('close-modal')) return;
+    if (this._readingPhoto) {
+      this._photoController?.abort(); this._photoController = null; this._readingPhoto = false; this._busy = false;
+    }
+    if (!force && this._draft && this._dirty && ['editor','picker','choose-record','code-conflict','scanner','start','revision','duplicate'].includes(this._modal?.kind) && !window.confirm(this._t('discard'))) { this._renderModal(); return; }
+    this._dialogGeneration++; this._stopCamera(); this._photoController?.abort(); this._photoController = null; this._readingPhoto = false; this.shadowRoot.querySelector('dialog')?.close();
     this.shadowRoot.getElementById('modal-root').innerHTML = ''; this._modal = null;
     this._draft = null; this._pendingCodes = null; this._preview = null; this._importSource = null;
     this._formRevealed.clear(); this._compareRevealed.clear();
@@ -185,10 +189,10 @@ class SetupCodeManagerPanel extends HTMLElement {
     const t = this._t; const kind = this._modal.kind;
     const cancel = this._button('close-modal',t('cancel'));
     let html = '';
-    if (kind === 'start') html = this._modalFrame(t('addTitle'), `<p>${esc(t('addIntro'))}</p><div class="choice-list">${[['start-scan','scan','camera'],['start-photo','photo','image'],['start-manual','manual','keyboard']].map(([action,label,image]) => `<button type="button" class="choice" data-action="${action}">${icon(image)}<span class="grow">${esc(t(label))}</span>${icon('chevron')}</button>`).join('')}</div><p class="small muted" style="margin-top:22px">${esc(t('noPairing'))}</p>`);
+    if (kind === 'start') html = this._modalFrame(t('addTitle'), `<p>${esc(t(this._canLiveScan() ? 'addIntro' : 'photoHint'))}</p><div class="choice-list">${[['start-scan',this._canLiveScan() ? 'scan' : 'takePhoto','camera'],['start-photo','photo','image'],['start-manual','manual','keyboard']].map(([action,label,image]) => `<button type="button" class="choice" data-action="${action}">${icon(image)}<span class="grow">${esc(t(label))}</span>${icon('chevron')}</button>`).join('')}</div><p class="small muted" style="margin-top:22px">${esc(t('noPairing'))}</p>`);
     else if (kind === 'menu') html = this._modalFrame(t('menu'),`<div class="choice-list">${this._button('import',t('import'),'download')}${this._button('export',t('export'),'upload')}${this._button('refresh-menu',t('refresh'),'refresh')}</div>`);
     else if (kind === 'editor') html = this._renderEditor();
-    else if (kind === 'scanner') html = this._modalFrame(t('scanTitle'), `<p>${esc(t('scanHint'))}</p><div id="scanner-error"></div><div class="scanner-frame"><video id="scan-video" autoplay muted playsinline></video><div class="scan-guide"></div><div class="camera-status" id="camera-status">${esc(t('cameraLoading'))}</div></div><p class="small">${esc(t('noPairing'))}</p><div class="scanner-buttons">${this._button('scan-photo',t('photo'),'image')}${this._button('scan-manual',t('enterCode'),'keyboard')}</div>`);
+    else if (kind === 'scanner') html = this._modalFrame(t('scanTitle'), `<p>${esc(t('scanHint'))}</p><div id="scanner-error"></div><div class="scanner-frame"><video id="scan-video" autoplay muted playsinline></video><div class="scan-guide"></div><div class="camera-status" id="camera-status">${esc(t('cameraLoading'))}</div></div><p class="small">${esc(t('noPairing'))}</p><div class="scanner-buttons">${this._button('scan-capture',t('takePhoto'),'camera')}${this._button('scan-photo',t('photo'),'image')}${this._button('scan-manual',t('enterCode'),'keyboard')}</div>`);
     else if (kind === 'picker') html = this._renderPicker();
     else if (kind === 'choose-record') html = this._modalFrame(t('selectRecord'), `<p>${esc(t('selectRecordHint'))}</p><div class="choice-list">${this._modal.records.map(record => `<button type="button" class="choice" data-action="use-record" data-id="${esc(record.id)}">${icon(record.archived ? 'archive' : 'key')}<span class="grow">${esc(record.name)}<small class="muted" style="display:block">${esc([record.location,displayProtocols(record).map(p => protocolNames[p]).join(', ')].filter(Boolean).join(' · '))}</small>${record.archived ? `<small class="muted" style="display:block;margin-top:7px">${esc(t('archivedTarget'))}</small>` : ''}</span>${icon('chevron')}</button>`).join('')}</div>`,this._button('back-picker',t('back')));
     else if (kind === 'code-conflict') html = this._modalFrame(t('existingCodeTitle'), `<p>${esc(t('existingCodeHint'))}</p><h3>${esc(protocolNames[this._modal.current.protocol])}</h3><div class="compare-grid">${this._compareCode(this._modal.current,t('existing'),'existing')}${this._compareCode(this._modal.incoming,t('incoming'),'incoming')}</div>`,this._button('keep-code',t('keepExisting'))+this._button('replace-code',t('useIncoming'),'','primary'));
@@ -205,7 +209,7 @@ class SetupCodeManagerPanel extends HTMLElement {
     if (!dialog) return;
     dialog.addEventListener('cancel',event => { event.preventDefault(); this._closeModal(); });
     dialog.showModal();
-    if (this._busy) dialog.querySelectorAll('input,select,textarea,button').forEach(control => { control.disabled = true; });
+    if (this._busy) dialog.querySelectorAll('input,select,textarea,button').forEach(control => { control.disabled = this._busyBlocks(control.dataset.action); });
     if (snapshot && snapshot.key !== 'search') this._restoreFocus(snapshot);
     else if (kind === 'editor') this.shadowRoot.querySelector('[data-field="name"]')?.focus({preventScroll:true});
     else if (kind === 'picker') this.shadowRoot.querySelector('[data-field="picker-search"]')?.focus({preventScroll:true});
@@ -220,8 +224,8 @@ class SetupCodeManagerPanel extends HTMLElement {
   _renderEditor() {
     const t = this._t; const draft = this._draft;
     const errorExtra = this._draftErrorCode === 'conflict' ? `<div>${this._button('compare-revision',t('compareCurrent'),'refresh','text')}</div>` : this._draftErrorCode === 'device_removed' ? `<div>${this._button('unlink-save',t('withoutLinkSave'),'unlink','text')}${this._button('picker',t('pickerTitle'),'link','text')}</div>` : this._draftErrorCode === 'duplicate_link' || this._draftErrorCode === 'archived_target' ? `<div>${this._button('picker',t('pickerTitle'),'link','text')}</div>` : '';
-    const body = `<form id="record-form">${this._detected ? this._notice(t('codeDetected',{protocol:protocolNames[this._detected]}),'success') : ''}${draft.archived ? this._notice(t('archivedTarget')) : ''}${this._draftError ? this._notice(this._draftError,'error',errorExtra) : ''}${this._field('name')}${this._field('location')}<details class="more" ${this._moreOpen ? 'open' : ''}><summary>${esc(t('moreDetails'))}</summary><div><div class="field-row">${this._field('manufacturer')}${this._field('model')}</div>${this._field('serial_number')}${this._field('notes','textarea')}</div></details><section class="editor-section"><h3>${esc(t('setupCodes'))}</h3>${draft.codes.map((code,index) => `<div class="editor-code"><div class="code-title"><select data-field="code-protocol" data-index="${index}" aria-label="${esc(t('protocol'))}">${PROTOCOLS.map(p => `<option value="${p}" ${code.protocol === p ? 'selected' : ''} ${draft.codes.some((other,i) => i !== index && other.protocol === p) ? 'disabled' : ''}>${protocolNames[p]}</option>`).join('')}</select>${this._iconButton('remove-code',t('removeCode'),'trash',`data-index="${index}"`)}</div><label class="field"><span>${esc(t('codeValue'))}</span><div class="input-secret"><input type="${this._formRevealed.has(code.id) ? 'text' : 'password'}" data-field="code-value" data-focus="code-${index}" data-index="${index}" value="${esc(code.value)}" autocomplete="off" spellcheck="false" maxlength="4096">${this._iconButton('form-reveal',t(this._formRevealed.has(code.id) ? 'hide' : 'reveal'),'eye',`data-index="${index}"`)}</div></label><div class="code-tools">${this._button('code-scan',t(code.value ? 'rescan' : 'scan'),'camera','text',`data-protocol="${code.protocol}"`)}${this._button('code-photo',t('photo'),'image','text',`data-protocol="${code.protocol}"`)}</div><label class="field"><span>${esc(t('codeLabel'))}</span><input type="text" data-field="code-label" data-focus="label-${index}" data-index="${index}" value="${esc(code.label)}" placeholder="${esc(t('codeLabelPlaceholder'))}" maxlength="256"></label></div>`).join('')}${draft.codes.length < PROTOCOLS.length ? this._button('add-slot',t('addCode'),'plus','text') : ''}</section><section class="editor-section"><h3>Home Assistant</h3><div class="link-box">${draft.links?.length ? draft.links.map((link,index) => `<div class="link-item">${icon('link')}<span>${esc(link.name || this._haDevices.find(d => d.id === link.ha_device_id)?.name || this._devices.find(r => r.links?.some(l => l.ha_device_id === link.ha_device_id))?.name || link.ha_device_id)}${link.active === false ? `<small class="muted" style="display:block">${esc(t('unlinked'))}</small>` : ''}</span>${this._iconButton('remove-link',t('removeLink'),'close',`data-index="${index}"`)}</div>`).join('') : `<p class="muted">${esc(t('noLink'))}</p>`}${this._button('picker',t(draft.links?.length ? 'changeLinks' : 'linkDevice'),'link','text')}<p class="muted">${esc(t('linkLater'))}</p></div></section></form>`;
-    return this._modalFrame(t(draft.id ? 'editTitle' : 'addTitle'),body,this._button('close-modal',t('cancel'))+`<button type="submit" form="record-form" class="button primary" ${this._busy ? 'disabled' : ''}>${this._busy ? '<span class="spinner"></span>' : ''}${esc(t(this._busy ? 'saving' : 'save'))}</button>`);
+    const body = `${this._readingPhoto ? `<div class="notice" role="status"><span class="spinner" aria-hidden="true"></span>${esc(t('readingPhoto'))}</div>` : ''}<form id="record-form">${this._detected ? this._notice(t('codeDetected',{protocol:protocolNames[this._detected]}),'success') : ''}${draft.archived ? this._notice(t('archivedTarget')) : ''}${this._draftError ? this._notice(this._draftError,'error',errorExtra) : ''}${this._field('name')}${this._field('location')}<details class="more" ${this._moreOpen ? 'open' : ''}><summary>${esc(t('moreDetails'))}</summary><div><div class="field-row">${this._field('manufacturer')}${this._field('model')}</div>${this._field('serial_number')}${this._field('notes','textarea')}</div></details><section class="editor-section"><h3>${esc(t('setupCodes'))}</h3>${draft.codes.map((code,index) => `<div class="editor-code"><div class="code-title"><select data-field="code-protocol" data-index="${index}" aria-label="${esc(t('protocol'))}">${PROTOCOLS.map(p => `<option value="${p}" ${code.protocol === p ? 'selected' : ''} ${draft.codes.some((other,i) => i !== index && other.protocol === p) ? 'disabled' : ''}>${protocolNames[p]}</option>`).join('')}</select>${this._iconButton('remove-code',t('removeCode'),'trash',`data-index="${index}"`)}</div><label class="field"><span>${esc(t('codeValue'))}</span><div class="input-secret"><input type="${this._formRevealed.has(code.id) ? 'text' : 'password'}" data-field="code-value" data-focus="code-${index}" data-index="${index}" value="${esc(code.value)}" autocomplete="off" spellcheck="false" maxlength="4096">${this._iconButton('form-reveal',t(this._formRevealed.has(code.id) ? 'hide' : 'reveal'),'eye',`data-index="${index}"`)}</div></label><div class="code-tools">${this._button('code-scan',t(this._canLiveScan() ? (code.value ? 'rescan' : 'scan') : 'takePhoto'),'camera','text',`data-protocol="${code.protocol}"`)}${this._button('code-photo',t('photo'),'image','text',`data-protocol="${code.protocol}"`)}</div><label class="field"><span>${esc(t('codeLabel'))}</span><input type="text" data-field="code-label" data-focus="label-${index}" data-index="${index}" value="${esc(code.label)}" placeholder="${esc(t('codeLabelPlaceholder'))}" maxlength="256"></label></div>`).join('')}${draft.codes.length < PROTOCOLS.length ? this._button('add-slot',t('addCode'),'plus','text') : ''}</section><section class="editor-section"><h3>Home Assistant</h3><div class="link-box">${draft.links?.length ? draft.links.map((link,index) => `<div class="link-item">${icon('link')}<span>${esc(link.name || this._haDevices.find(d => d.id === link.ha_device_id)?.name || this._devices.find(r => r.links?.some(l => l.ha_device_id === link.ha_device_id))?.name || link.ha_device_id)}${link.active === false ? `<small class="muted" style="display:block">${esc(t('unlinked'))}</small>` : ''}</span>${this._iconButton('remove-link',t('removeLink'),'close',`data-index="${index}"`)}</div>`).join('') : `<p class="muted">${esc(t('noLink'))}</p>`}${this._button('picker',t(draft.links?.length ? 'changeLinks' : 'linkDevice'),'link','text')}<p class="muted">${esc(t('linkLater'))}</p></div></section></form>`;
+    return this._modalFrame(t(draft.id ? 'editTitle' : 'addTitle'),body,this._button('close-modal',t('cancel'))+`<button type="submit" form="record-form" class="button primary" ${this._busy ? 'disabled' : ''}>${this._busy && !this._readingPhoto ? '<span class="spinner"></span>' : ''}${esc(t(this._busy && !this._readingPhoto ? 'saving' : 'save'))}</button>`);
   }
   _pickerRecords(device) { return this._devices.filter(record => (device.record_ids || []).includes(record.id) || record.links?.some(link => link.ha_device_id === device.id)); }
   _pickerMissing(device) { return !this._pickerRecords(device).some(record => hasCode(record,this._activeProtocol)); }
@@ -307,7 +311,12 @@ class SetupCodeManagerPanel extends HTMLElement {
     if (!next || this._draft.codes.some(code => code.protocol === next)) return;
     this._draft.codes.push({id:uid(),protocol:next,value:'',label:''}); this._dirty = true; this._activeProtocol = next;
   }
+  _canLiveScan() {
+    return globalThis.isSecureContext !== false && typeof globalThis.navigator?.mediaDevices?.getUserMedia === 'function';
+  }
   async _startCamera(protocol) {
+    // Keep the capture picker inside the original tap; iOS requires user activation.
+    if (!this._canLiveScan()) { this._choosePhoto(protocol, true); return; }
     if (protocol) this._activeProtocol = protocol;
     this._openModal('scanner');
     const controller = new AbortController(); this._cameraController = controller;
@@ -316,6 +325,7 @@ class SetupCodeManagerPanel extends HTMLElement {
       if (controller.signal.aborted || this._modal?.kind !== 'scanner') return;
       const el = this.shadowRoot.getElementById('scanner-error');
       if (el) el.innerHTML = this._notice(this._errorText(error,'scanFailed'),'error');
+      this.shadowRoot.querySelector('.scanner-frame')?.setAttribute('hidden','');
       this.shadowRoot.getElementById('camera-status')?.setAttribute('hidden','');
     };
     try {
@@ -340,24 +350,33 @@ class SetupCodeManagerPanel extends HTMLElement {
     this._pendingCodes = [{id:uid(),protocol,value,label:''}];
     this._applyPendingCodes();
   }
-  _chooseFile(accept,onFile) {
+  _chooseFile(accept,onFile,{capture = false} = {}) {
     const input = document.createElement('input'); input.type = 'file'; input.accept = accept;
+    if (capture) input.setAttribute('capture','environment');
     input.style.display = 'none'; this.shadowRoot.appendChild(input);
     input.addEventListener('change',() => { const file = input.files?.[0]; input.remove(); if (file) onFile(file); },{once:true});
     input.addEventListener('cancel',() => input.remove(),{once:true});
     input.click();
   }
-  _choosePhoto(protocol) {
+  _choosePhoto(protocol,capture = false) {
     const generation = this._dialogGeneration;
     if (protocol) this._activeProtocol = protocol;
     this._chooseFile('image/*',async file => {
       if (generation !== this._dialogGeneration || !this._draft) return;
-      this._stopCamera(); this._busy = true;
-      if (this._modal?.kind === 'scanner') this._openModal('editor');
+      this._photoController?.abort();
+      const controller = new AbortController(); this._photoController = controller;
+      this._stopCamera(); this._busy = true; this._readingPhoto = true; this._draftError = '';
+      if (this._modal?.kind !== 'editor') this._openModal('editor');
       else this._renderModal();
-      try { const value = await scanImage(file); if (generation !== this._dialogGeneration || !this._draft) return; this._busy = false; this._receiveScan(value); }
-      catch (error) { if (generation !== this._dialogGeneration || !this._draft) return; this._busy = false; this._draftError = this._errorText(error,'scanFailed'); this._openModal('editor'); }
-    });
+      try {
+        const value = await scanImage(file,{signal:controller.signal});
+        if (generation !== this._dialogGeneration || !this._draft || controller.signal.aborted) return;
+        this._busy = false; this._readingPhoto = false; this._receiveScan(value);
+      } catch (error) {
+        if (generation !== this._dialogGeneration || !this._draft || controller.signal.aborted) return;
+        this._busy = false; this._readingPhoto = false; this._draftError = this._errorText(error,'scanFailed'); this._openModal('editor');
+      } finally { if (this._photoController === controller) this._photoController = null; }
+    },{capture});
   }
   async _save(ignoreDuplicates = false) {
     if (!this._draft || this._busy) return;
@@ -475,7 +494,7 @@ class SetupCodeManagerPanel extends HTMLElement {
   }
   async _onClick(event) {
     const button = event.target.closest?.('[data-action]');
-    if (!button || button.disabled || this._busy) return;
+    if (!button || button.disabled || this._busyBlocks(button.dataset.action)) return;
     const action = button.dataset.action;
     const id = button.dataset.id;
     const record = this._devices.find(item => item.id === (id || this._selectedId));
@@ -501,6 +520,7 @@ class SetupCodeManagerPanel extends HTMLElement {
       else if (action === 'start-photo') this._choosePhoto();
       else if (action === 'code-scan') await this._startCamera(button.dataset.protocol);
       else if (action === 'code-photo') this._choosePhoto(button.dataset.protocol);
+      else if (action === 'scan-capture') this._choosePhoto(undefined,true);
       else if (action === 'scan-photo') this._choosePhoto();
       else if (action === 'scan-manual') { this._addSlot(this._activeProtocol); this._openModal('editor'); }
       else if (action === 'back-editor') this._openModal('editor');
