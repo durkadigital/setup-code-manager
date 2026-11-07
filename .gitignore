@@ -216,3 +216,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Local Home Assistant runtime data and real setup-code exports
+.DS_Store
+.storage/
+/ha-config/
+/local-data/
+/backups/
+/exports/
