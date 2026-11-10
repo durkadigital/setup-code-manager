@@ -1,11 +1,17 @@
 /** Explicitly synthetic, memory-only API for exercising the production panel. */
 import '../custom_components/setup_code_manager/www/panel.js';
+import { normalizeViewPreferences } from '../custom_components/setup_code_manager/www/preferences.js';
 const copy = value => JSON.parse(JSON.stringify(value));
 const now = () => new Date().toISOString();
 const MATTER = 'MT:Y.K9042C00KA0648G00';
 const HOMEKIT = '111-22-333';
 const DSK = '12345-23456-34567-45678-56789-01234-02345-03456';
 const INSTANCE = 'synthetic-local-preview';
+// Browser storage only simulates a durable server in this disconnected demo.
+const DEMO_VIEWS_KEY = 'setup-code-manager:demo-server-views:v1';
+let demoViews = {revision:0,views:[],defaultViewId:''};
+try { const stored = JSON.parse(localStorage.getItem(DEMO_VIEWS_KEY)); if (Number.isSafeInteger(stored?.revision) && stored.revision >= 0) demoViews = {revision:stored.revision,...normalizeViewPreferences(stored)}; } catch { /* Fresh preview. */ }
+
 // HA organization is derived for responses and never written into inventory.
 const syntheticAreas = {
   Wohnzimmer:{id:'demo-living',floor_id:'demo-ground',floor_name:'Erdgeschoss'},
@@ -126,7 +132,14 @@ async function callWS(message) {
   // Inventory examples remain in memory; the panel may remember view settings separately.
   await new Promise(resolve => setTimeout(resolve,120));
   const command = message.type.replace('setup_code_manager/','');
-  if(command === 'list') return {devices:decorated(devices),revision,instance_id:INSTANCE,legacy_available:true};
+  if(command === 'list') return {devices:decorated(devices),revision,instance_id:INSTANCE,legacy_available:true,view_preferences:copy(demoViews)};
+  if(command === 'view_preferences') return copy(demoViews);
+  if(command === 'save_view_preferences') {
+    if(message.expected_revision !== demoViews.revision) failure('preferences_conflict');
+    const candidate = {revision:demoViews.revision+1,...normalizeViewPreferences(message.preferences)};
+    try { localStorage.setItem(DEMO_VIEWS_KEY,JSON.stringify(candidate)); } catch { failure('preferences_save_failed'); }
+    demoViews = candidate; emit(); return copy(demoViews);
+  }
   if(command === 'ha_devices') return {devices:haDevices.map(device=>({...copy(device),...organizationFromHA(device),record_ids:devices.filter(record=>record.links.some(link=>link.ha_device_id === device.id)).map(record=>record.id)}))};
   if(command === 'save') {
     ensureRevision(message.expected_revision);

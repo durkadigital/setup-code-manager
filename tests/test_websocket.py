@@ -19,6 +19,11 @@ from custom_components.setup_code_manager.manager import InventoryError, SetupCo
 SECRET = "SYNTHETIC_PRIVATE_SETUP_CODE_DO_NOT_LOG"
 COMMANDS = {
     "list": {},
+    "view_preferences": {},
+    "save_view_preferences": {
+        "preferences": {"views": [], "defaultViewId": ""},
+        "expected_revision": 7,
+    },
     "ha_devices": {},
     "sync": {},
     "save": {"record": {"name": "Test", "secret": SECRET}, "expected_revision": 7},
@@ -28,7 +33,7 @@ COMMANDS = {
     "preview_import": {"format": "json", "content": SECRET},
     "import": {"token": "preview-1", "decisions": {"record-1": "add"}, "expected_revision": 7},
 }
-MUTATING = ("save", "delete", "archive", "import")
+MUTATING = ("save", "delete", "archive", "import", "save_view_preferences")
 
 
 class Connection:
@@ -66,6 +71,16 @@ async def api(tmp_path):
     hass = HomeAssistant(str(tmp_path))
     manager = create_autospec(SetupCodesManager, instance=True)
     manager.list_data.return_value = {"devices": [], "revision": 7}
+    manager.async_get_view_preferences.return_value = {
+        "revision": 0,
+        "views": [],
+        "defaultViewId": "",
+    }
+    manager.async_save_view_preferences.return_value = {
+        "revision": 8,
+        "views": [],
+        "defaultViewId": "",
+    }
     manager.ha_devices.return_value = {"devices": []}
     manager.async_save.return_value = {"id": "record-1"}
     manager.async_sync.return_value = []
@@ -76,8 +91,8 @@ async def api(tmp_path):
     websocket_api.async_register(hass)
     connections = []
 
-    def connection(*, admin=True, authenticated=True):
-        user = SimpleNamespace(id="admin-1", name="Test", is_admin=admin) if authenticated else None
+    def connection(*, admin=True, authenticated=True, user_id="admin-1"):
+        user = SimpleNamespace(id=user_id, name="Test", is_admin=admin) if authenticated else None
         result = Connection(user)
         connections.append(result)
         return result
@@ -103,9 +118,11 @@ async def invoke(hass, connection, name):
     assert not connection.unhandled
 
 
-def test_all_nine_handlers_have_distinct_registered_types():
+def test_all_handlers_have_distinct_registered_types():
     handlers = [
         websocket_api.ws_list,
+        websocket_api.ws_view_preferences,
+        websocket_api.ws_save_view_preferences,
         websocket_api.ws_ha_devices,
         websocket_api.ws_sync,
         websocket_api.ws_save,
@@ -130,6 +147,11 @@ async def test_admin_commands_schedule_and_respond_through_real_ha_decorators(ap
     assert conn.results[0][0] == 42
     expected = {
         "list": ("list_data", ()),
+        "view_preferences": ("async_get_view_preferences", ("admin-1",)),
+        "save_view_preferences": (
+            "async_save_view_preferences",
+            ("admin-1", COMMANDS["save_view_preferences"]["preferences"], 7),
+        ),
         "ha_devices": ("ha_devices", ()),
         "sync": ("async_sync", ()),
         "save": ("async_save", (COMMANDS["save"]["record"], 7)),
@@ -145,6 +167,76 @@ async def test_admin_commands_schedule_and_respond_through_real_ha_decorators(ap
         getattr(manager, method_name).assert_awaited_once()
     if name in ("archive", "delete"):
         assert conn.results[0][1] is None
+
+
+@pytest.mark.parametrize("name", ["list", "view_preferences", "save_view_preferences"])
+async def test_preference_account_comes_only_from_authenticated_connection(api, name):
+    hass, manager, connection = api
+    conn = connection(user_id="other-admin")
+    await invoke(hass, conn, name)
+    method = (
+        manager.async_save_view_preferences
+        if name == "save_view_preferences"
+        else manager.async_get_view_preferences
+    )
+    assert method.await_args.args[0] == "other-admin"
+    assert not conn.errors
+
+
+@pytest.mark.parametrize("field", ["user_id", "userId", "scope", "owner"])
+async def test_preference_write_schema_rejects_client_account_fields(api, field):
+    hass, _, _ = api
+    with pytest.raises(probatio.Invalid):
+        command(hass, "save_view_preferences", **{field: "another-account"})
+
+
+@pytest.mark.parametrize("name", ["list", "view_preferences"])
+async def test_type_only_read_commands_ignore_payload_account_fields(api, name):
+    hass, manager, connection = api
+    conn = connection(user_id="authenticated-user")
+    # HA deliberately skips schemas for type-only commands. The handler must
+    # still use the connection account even when an untrusted field is present.
+    handler, message = command(hass, name, user_id="another-account", scope="global")
+    handler(hass, conn, message)
+    await asyncio.wait_for(conn.completed, timeout=2)
+    manager.async_get_view_preferences.assert_awaited_once_with("authenticated-user")
+    assert not conn.errors
+
+
+async def test_list_includes_only_own_preferences_and_keeps_inventory_on_preferences_failure(api):
+    hass, manager, connection = api
+    conn = connection()
+    await invoke(hass, conn, "list")
+    assert conn.results[0][1] == {
+        "devices": [],
+        "revision": 7,
+        "view_preferences": {"revision": 0, "views": [], "defaultViewId": ""},
+    }
+    manager.list_data.return_value = {"devices": [{"id": "kept"}], "revision": 9}
+    manager.async_get_view_preferences.side_effect = InventoryError("preferences_unavailable")
+    failed = connection()
+    await invoke(hass, failed, "list")
+    assert not failed.errors
+    assert failed.results[0][1] == {
+        "devices": [{"id": "kept"}],
+        "revision": 9,
+        "view_preferences_error": "preferences_unavailable",
+    }
+
+
+async def test_list_takes_inventory_snapshot_after_waiting_for_preferences_lock(api):
+    hass, manager, connection = api
+
+    async def preferences_after_write(_user):
+        await asyncio.sleep(0)
+        manager.list_data.return_value = {"devices": [{"id": "newly-written"}], "revision": 8}
+        return {"revision": 1, "views": [], "defaultViewId": ""}
+
+    manager.async_get_view_preferences.side_effect = preferences_after_write
+    conn = connection()
+    await invoke(hass, conn, "list")
+    assert conn.results[0][1]["devices"] == [{"id": "newly-written"}]
+    assert conn.results[0][1]["revision"] == 8
 
 
 async def test_selected_export_ids_are_passed_through_admin_api(api):
@@ -245,6 +337,8 @@ async def test_errors_are_sanitized_before_ha_exception_handler(api, caplog, nam
     hass, manager, connection = api
     method = {
         "list": "list_data",
+        "view_preferences": "async_get_view_preferences",
+        "save_view_preferences": "async_save_view_preferences",
         "ha_devices": "ha_devices",
         "sync": "async_sync",
         "save": "async_save",

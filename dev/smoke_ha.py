@@ -136,7 +136,26 @@ async def smoke(directory: str, results: dict, evidence: RuntimeEvidence) -> Non
 
             # These users and access tokens exist only in this temporary instance.
             users = []
-            for name, group in [("Smoke Admin", GROUP_ID_ADMIN), ("Smoke Regular", GROUP_ID_USER)]:
+            expected_preferences = {}
+            synthetic_view = {
+                "views": [
+                    {
+                        "id": "synthetic-home",
+                        "name": "Synthetic central view",
+                        "settings": {
+                            "room": "room:Synthetic room",
+                            "sort": "updated-desc",
+                            "group": "room",
+                        },
+                    }
+                ],
+                "defaultViewId": "synthetic-home",
+            }
+            for name, group in [
+                ("Smoke Admin", GROUP_ID_ADMIN),
+                ("Smoke Regular", GROUP_ID_USER),
+                ("Smoke Other Admin", GROUP_ID_ADMIN),
+            ]:
                 user = await hass.auth.async_create_user(name, group_ids=[group], local_only=True)
                 refresh = await hass.auth.async_create_refresh_token(
                     user, client_id="http://127.0.0.1/runtime-smoke"
@@ -197,7 +216,78 @@ async def smoke(directory: str, results: dict, evidence: RuntimeEvidence) -> Non
                             denied_export = await ws.receive_json()
                             assert denied_export["success"] is False
                             assert denied_export["error"]["code"] == "unauthorized"
+                            for message_id, command, payload in (
+                                (3, "view_preferences", {}),
+                                (
+                                    4,
+                                    "save_view_preferences",
+                                    {"preferences": synthetic_view, "expected_revision": 0},
+                                ),
+                            ):
+                                await ws.send_json(
+                                    {"id": message_id, "type": DOMAIN + "/" + command, **payload}
+                                )
+                                denied_preferences = await ws.receive_json()
+                                assert denied_preferences["success"] is False
+                                assert denied_preferences["error"]["code"] == "unauthorized"
                             results["checks"]["regular_user_api_denied"] = True
+                            continue
+                        if user.id != users[0][0].id:
+                            # Another real admin sees the common inventory but
+                            # starts with a separate, empty preference catalogue.
+                            assert listing["success"] and len(listing["result"]["devices"]) == 1
+                            assert listing["result"]["view_preferences"] == {
+                                "revision": 0,
+                                "views": [],
+                                "defaultViewId": "",
+                            }
+                            own_preferences = {
+                                "views": [
+                                    {
+                                        "id": "synthetic-other",
+                                        "name": "Other account view",
+                                        "settings": {"codeStatus": "missing"},
+                                    }
+                                ],
+                                "defaultViewId": "synthetic-other",
+                            }
+                            await ws.send_json(
+                                {
+                                    "id": 2,
+                                    "type": DOMAIN + "/save_view_preferences",
+                                    "preferences": own_preferences,
+                                    "expected_revision": 0,
+                                }
+                            )
+                            own_saved = await ws.receive_json()
+                            assert own_saved["success"] and own_saved["result"]["revision"] == 1
+                            assert own_saved["result"]["defaultViewId"] == "synthetic-other"
+                            assert [view["id"] for view in own_saved["result"]["views"]] == [
+                                "synthetic-other"
+                            ]
+                            # The real HA dispatcher also rejects unknown fields
+                            # on type-only commands, before the handler is called.
+                            await ws.send_json(
+                                {
+                                    "id": 3,
+                                    "type": DOMAIN + "/view_preferences",
+                                    "user_id": users[0][0].id,
+                                }
+                            )
+                            spoofed_read = await ws.receive_json()
+                            assert spoofed_read["success"] is False
+                            assert spoofed_read["error"]["code"] == "invalid_format"
+                            await ws.send_json({"id": 4, "type": DOMAIN + "/view_preferences"})
+                            own_read = await ws.receive_json()
+                            assert own_read["success"] and own_read["result"] == own_saved["result"]
+                            await ws.send_json({"id": 5, "type": DOMAIN + "/list"})
+                            own_listing = await ws.receive_json()
+                            assert (
+                                own_listing["success"]
+                                and own_listing["result"]["view_preferences"] == own_saved["result"]
+                            )
+                            expected_preferences[user.id] = own_saved["result"]
+                            results["checks"]["other_admin_view_isolation"] = True
                             continue
                         assert listing["success"] and listing["result"]["devices"] == []
                         await ws.send_json(
@@ -255,7 +345,57 @@ async def smoke(directory: str, results: dict, evidence: RuntimeEvidence) -> Non
                         assert missing["success"] is False
                         assert missing["error"]["code"] == "not_found"
                         results["checks"]["admin_selected_export"] = True
-            users.clear()
+                        await ws.send_json({"id": 20, "type": DOMAIN + "/list"})
+                        before_preferences = await ws.receive_json()
+                        assert before_preferences["success"]
+                        assert before_preferences["result"]["view_preferences"] == {
+                            "revision": 0,
+                            "views": [],
+                            "defaultViewId": "",
+                        }
+                        await ws.send_json(
+                            {
+                                "id": 21,
+                                "type": DOMAIN + "/save_view_preferences",
+                                "preferences": synthetic_view,
+                                "expected_revision": 0,
+                            }
+                        )
+                        preferences_saved = await ws.receive_json()
+                        assert (
+                            preferences_saved["success"]
+                            and preferences_saved["result"]["revision"] == 1
+                        )
+                        assert preferences_saved["result"]["defaultViewId"] == "synthetic-home"
+                        assert (
+                            preferences_saved["result"]["views"][0]["settings"]["room"]
+                            == "room:Synthetic room"
+                        )
+                        await ws.send_json({"id": 22, "type": DOMAIN + "/view_preferences"})
+                        preferences_read = await ws.receive_json()
+                        assert (
+                            preferences_read["success"]
+                            and preferences_read["result"] == preferences_saved["result"]
+                        )
+                        await ws.send_json({"id": 23, "type": DOMAIN + "/list"})
+                        preferences_listing = await ws.receive_json()
+                        assert preferences_listing["success"]
+                        assert (
+                            preferences_listing["result"]["view_preferences"]
+                            == preferences_saved["result"]
+                        )
+                        assert (
+                            preferences_listing["result"]["revision"]
+                            == before_preferences["result"]["revision"]
+                        )
+                        await ws.send_json({"id": 24, "type": DOMAIN + "/export", "format": "json"})
+                        unchanged_export = await ws.receive_json()
+                        assert unchanged_export["success"]
+                        assert (
+                            unchanged_export["result"]["content"] == exported["result"]["content"]
+                        )
+                        expected_preferences[user.id] = preferences_saved["result"]
+                        results["checks"]["admin_views_account_persistence"] = True
             results["stage"] = "reload"
             assert await hass.config_entries.async_unload(entry.entry_id)
             assert DOMAIN not in hass.data
@@ -263,6 +403,28 @@ async def smoke(directory: str, results: dict, evidence: RuntimeEvidence) -> Non
             assert entry.state is ConfigEntryState.LOADED
             assert len(hass.data[DOMAIN].list_data()["devices"]) == 1
             results["checks"]["unload_reload_preserves_record"] = True
+            async with aiohttp.ClientSession() as client:
+                for user, access_token in users:
+                    if not user.is_admin:
+                        continue
+                    async with client.ws_connect(base + "/api/websocket") as ws:
+                        assert (await ws.receive_json())["type"] == "auth_required"
+                        await ws.send_json({"type": "auth", "access_token": access_token})
+                        assert (await ws.receive_json())["type"] == "auth_ok"
+                        await ws.send_json({"id": 1, "type": DOMAIN + "/view_preferences"})
+                        reloaded_preferences = await ws.receive_json()
+                        assert reloaded_preferences["success"]
+                        assert reloaded_preferences["result"] == expected_preferences[user.id]
+                        await ws.send_json({"id": 2, "type": DOMAIN + "/list"})
+                        reloaded_listing = await ws.receive_json()
+                        assert reloaded_listing["success"]
+                        assert (
+                            reloaded_listing["result"]["view_preferences"]
+                            == expected_preferences[user.id]
+                        )
+            users.clear()
+            expected_preferences.clear()
+            results["checks"]["unload_reload_preserves_views"] = True
             second_flow = await hass.config_entries.flow.async_init(
                 DOMAIN, context={"source": "user"}
             )

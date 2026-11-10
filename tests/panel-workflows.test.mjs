@@ -22,12 +22,12 @@ function memoryStorage() {
   const values = new Map();
   return { values, getItem:key => values.get(key) ?? null, setItem:(key, item) => values.set(key,item) };
 }
-function fixture({ storage = memoryStorage(), user = 'synthetic-user' } = {}) {
+function fixture({ storage = memoryStorage(), user = 'synthetic-user', failViewWrites = false } = {}) {
   const panel = new Panel();
   panel._hass = { language:'en', user:user ? { id:user } : {} };
   panel._instance = 'synthetic-ha'; panel._loading = false; panel._connected = true;
   panel._devices = [record('a'),record('b',{ location:'Kitchen' }),record('archive',{ archived:true })];
-  const state = { renders:0, modalRenders:0, toasts:[], focused:null, hidden:false, expanded:'true', downloads:[] };
+  const state = { renders:0, modalRenders:0, toasts:[], focused:null, hidden:false, expanded:'true', downloads:[], viewPreferences:new Map(), viewWrites:[], failViewWrites };
   const filter = { hidden:false, hidePopover() { state.hidden = true; } };
   const button = { setAttribute(name, item) { if (name === 'aria-expanded') state.expanded = item; }, focus() { state.focused = 'filter'; } };
   const search = { focus() { state.focused = 'search'; } };
@@ -38,11 +38,23 @@ function fixture({ storage = memoryStorage(), user = 'synthetic-user' } = {}) {
   panel._renderMain = () => { state.renders++; };
   panel._renderModal = () => { state.modalRenders++; };
   panel._toast = message => { state.toasts.push(message); };
+  panel._api = async (command,data) => {
+    assert.equal(command,'save_view_preferences');
+    state.viewWrites.push(structuredClone(data));
+    if (state.failViewWrites) throw { code:'preferences_save_failed' };
+    const key = preferenceKey(panel._instance,panel._hass.user?.id);
+    const current = state.viewPreferences.get(key) || { revision:0, views:[], defaultViewId:'' };
+    assert.equal(data.expected_revision,current.revision);
+    const saved = { revision:current.revision + 1, ...structuredClone(data.preferences) };
+    state.viewPreferences.set(key,saved);
+    return structuredClone(saved);
+  };
   globalThis.window = { innerWidth:1200, innerHeight:900, localStorage:storage, confirm:() => true, addEventListener() {}, removeEventListener() {} };
   globalThis.document = { addEventListener() {}, removeEventListener() {}, body:{ appendChild() {} }, createElement(tag) {
     assert.equal(tag,'a');
     return { click() { state.downloads.push({ href:this.href, filename:this.download }); }, remove() {} };
   } };
+  panel._loadViewPreferences({ revision:0, views:[], defaultViewId:'' });
   return { panel,state,storage,filter,button };
 }
 function escape(panel) {
@@ -54,46 +66,48 @@ function click(panel, action, fields = {}) {
   return panel._onClick({ target:{ closest:() => ({ disabled:false, dataset:{ action,...fields } }) } });
 }
 
-test('saving a view stores current structured controls but never the code search or inventory', () => {
+test('saving a view sends current structured controls to HA but never the code search or inventory', async () => {
   const { panel,state,storage } = fixture();
   panel._query = 'MT:SYNTHETIC-PRIVATE-SEARCH'; panel._viewName = 'Office missing codes';
   panel._room = 'room:Office'; panel._codeStatusFilter = 'missing'; panel._sort = 'updated-desc'; panel._group = 'room';
-  panel._saveView();
+  await panel._saveView();
   assert.equal(panel._savedViews.length,1);
   assert.equal(panel._activeViewId,panel._savedViews[0].id);
   assert.equal(panel._savedViews[0].settings.sort,'updated-desc');
   assert.equal(panel._savedViews[0].settings.room,'room:Office');
   assert.equal(panel._query,'MT:SYNTHETIC-PRIVATE-SEARCH');
-  const stored = storage.getItem(preferenceKey('synthetic-ha','synthetic-user'));
+  const stored = JSON.stringify(state.viewWrites[0]);
   assert.doesNotMatch(stored,/SYNTHETIC-PRIVATE-SEARCH|"query":|"devices":|"notes":|"codes":/);
+  assert.equal(storage.values.size,0);
   assert.equal(state.toasts.length,1);
 });
 
-test('missing user and unavailable storage leave saved views untouched and report failure', () => {
-  for (const config of [{ user:'' }, { storage:{ getItem() { return null; }, setItem() { throw new Error('quota'); } } }]) {
+test('missing user and server write failures leave saved views untouched', async () => {
+  for (const config of [{ user:'' }, { failViewWrites:true }]) {
     const { panel,state } = fixture(config);
     panel._savedViews = [{ id:'existing', name:'Existing', settings:{} }];
     panel._viewName = 'New view';
-    panel._saveView();
+    await panel._saveView();
     assert.deepEqual(panel._savedViews.map(view => view.id),['existing']);
     assert.equal(panel._activeViewId,'');
-    assert.equal(state.renders,0);
-    assert.equal(state.toasts.length,1);
+    assert.equal(state.viewWrites.length,config.user === '' ? 0 : 1);
+    assert.equal(state.toasts.length,config.user === '' ? 0 : 1);
   }
 });
 
-test('saved views remain separated when the current HA user or instance changes', () => {
-  const { panel,storage } = fixture();
-  panel._viewName = 'User one'; panel._saveView();
-  panel._hass.user.id = 'other-user'; panel._loadViewPreferences();
+test('saved views remain separated when the current HA user or instance changes', async () => {
+  const { panel,state } = fixture();
+  const load = () => panel._loadViewPreferences(state.viewPreferences.get(preferenceKey(panel._instance,panel._hass.user.id)) || { revision:0, views:[], defaultViewId:'' });
+  panel._viewName = 'User one'; await panel._saveView();
+  panel._hass.user.id = 'other-user'; await load();
   assert.deepEqual(panel._savedViews,[]);
   assert.equal(panel._activeViewId,'');
   assert.equal(panel._viewName,'');
-  panel._hass.user.id = 'synthetic-user'; panel._loadViewPreferences();
+  panel._hass.user.id = 'synthetic-user'; await load();
   assert.deepEqual(panel._savedViews.map(view => view.name),['User one']);
-  panel._instance = 'other-ha'; panel._loadViewPreferences();
+  panel._instance = 'other-ha'; await load();
   assert.deepEqual(panel._savedViews,[]);
-  assert.equal(storage.values.size,1);
+  assert.equal(state.viewPreferences.size,1);
 });
 
 test('applying a saved view clears transient search, selection and collapsed groups', () => {
@@ -110,33 +124,32 @@ test('applying a saved view clears transient search, selection and collapsed gro
   assert.equal(panel._activeViewId,'saved');
 });
 
-test('updating an active view preserves its identity and refuses another view with the same name', () => {
+test('updating an active view preserves its identity and refuses another view with the same name', async () => {
   const { panel,state } = fixture();
-  panel._viewName = 'Work'; panel._saveView();
+  panel._viewName = 'Work'; await panel._saveView();
   const id = panel._activeViewId;
-  panel._room = 'room:Kitchen'; panel._saveView();
+  panel._room = 'room:Kitchen'; await panel._saveView();
   assert.equal(panel._savedViews.length,1);
   assert.equal(panel._savedViews[0].id,id);
   assert.equal(panel._savedViews[0].settings.room,'room:Kitchen');
   panel._activeViewId = ''; panel._viewName = 'work';
-  panel._saveView();
+  await panel._saveView();
   assert.equal(panel._savedViews.length,1);
   assert.equal(state.toasts.length,3);
 });
 
-test('removing a saved view requires confirmation and retains it when persistence fails', () => {
-  const { panel,storage } = fixture();
-  panel._viewName = 'Work'; panel._saveView();
+test('removing a saved view requires confirmation and retains it when persistence fails', async () => {
+  const { panel,state } = fixture();
+  panel._viewName = 'Work'; await panel._saveView();
   globalThis.window.confirm = () => false;
-  panel._deleteView();
+  await panel._deleteView();
   assert.equal(panel._savedViews.length,1);
   globalThis.window.confirm = () => true;
-  const setItem = storage.setItem;
-  storage.setItem = () => { throw new Error('quota'); };
-  panel._deleteView();
+  state.failViewWrites = true;
+  await panel._deleteView();
   assert.equal(panel._savedViews.length,1);
-  storage.setItem = setItem;
-  panel._deleteView();
+  state.failViewWrites = false;
+  await panel._deleteView();
   assert.deepEqual(panel._savedViews,[]);
   assert.equal(panel._activeViewId,'');
 });

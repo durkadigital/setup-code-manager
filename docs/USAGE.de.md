@@ -51,15 +51,29 @@ Eine gespeicherte Ansicht auswählen und **Als Standard verwenden** wählen, dam
 sie beim Öffnen automatisch geladen wird. **Standard aufheben** entfernt nur diese
 Voreinstellung; die gespeicherte Ansicht bleibt erhalten. Automatische
 HA-Aktualisierungen überschreiben zwischenzeitlich geänderte Filter nicht.
-Bereits gespeicherte Ansichten bleiben erhalten und können direkt zum Standard
-gemacht werden. Beim Löschen der Standardansicht wird auch die Voreinstellung entfernt.
+Beim Löschen der Standardansicht wird auch die Voreinstellung entfernt.
 
 Bis zu 20 Ansichten lassen sich speichern, aktualisieren und entfernen. Die
-Ansichten und ihr Standard gelten für die HA-Instanz und das angemeldete HA-Konto
-in diesem Browser.
-Ein anderer Browser oder eine andere HA-Adresse hat einen eigenen Browser-Speicher.
-Die Ansichten sind nicht Teil eines Inventarexports oder HA-Backups. Ein gesperrter
-Browser-Speicher verhindert nur das Speichern von Ansichten, nicht die Codepflege.
+Ansichten und ihr Standard werden in Home Assistant für dein angemeldetes HA-Konto
+gespeichert. Mit demselben Konto stehen sie auch auf anderen Browsern und Geräten
+derselben HA-Installation zur Verfügung. Andere HA-Konten haben eigene Ansichten.
+Bei einem Kontowechsel werden die vorherige Suche und Filterauswahl zurückgesetzt;
+ohne eigenen Standard startet das neue Konto mit den normalen Listeneinstellungen.
+
+Beim ersten Öffnen übernimmt die App bisherige lokale Ansichten samt Standard,
+wenn für das Konto noch nie zentrale Ansichten gespeichert wurden. Die lokale
+v1-Sicherung bleibt unverändert im Browser. Ein bewusst geleerter zentraler
+Katalog wird nicht automatisch aus dieser Sicherung wieder gefüllt. Existieren
+bereits zentrale Ansichten, können zusätzliche lokale Ansichten über **Lokale
+Ansichten übernehmen** hinzugefügt werden. Bestehende zentrale Einträge und der
+zentrale Standard werden dabei nicht ersetzt. Wegen des Limits nicht übernommene
+Ansichten bleiben lokal erhalten.
+
+Bei gleichzeitigen Änderungen auf mehreren Geräten wird ein veralteter
+Speicherversuch abgelehnt und der aktuelle Katalog geladen. Die Änderung prüfen
+und bei Bedarf erneut speichern. Ist der Kontospeicher nicht verfügbar, bleiben
+die gespeicherten Ansichten schreibgeschützt; die Geräteliste ist weiter nutzbar.
+Ansichten gehören zur HA-Konfigurationssicherung, nicht zum JSON-/CSV-Inventarexport.
 
 ## Ausgewählte Einträge exportieren
 

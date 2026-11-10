@@ -1,7 +1,9 @@
 """Exercise persistence and registry behavior with actual Home Assistant helpers."""
 
+import asyncio
 import json
 from copy import deepcopy
+from threading import Event
 from types import MappingProxyType
 from unittest.mock import patch
 
@@ -16,8 +18,16 @@ from homeassistant.helpers import label_registry as lr
 
 from custom_components.setup_code_manager.inventory import new_record
 from custom_components.setup_code_manager.manager import InventoryError, SetupCodesManager
+from custom_components.setup_code_manager.preferences import validate_preferences
 from custom_components.setup_code_manager.store import SetupCodesStore
 from custom_components.setup_code_manager.transfer import export_data, parse_import
+
+
+def saved_preferences(name="Zuhause", room="room:Kinderzimmer"):
+    return {
+        "views": [{"id": "home", "name": name, "settings": {"room": room}}],
+        "defaultViewId": "home",
+    }
 
 
 @pytest.fixture
@@ -37,6 +47,144 @@ async def manager(tmp_path):
     yield manager
     manager.async_unload()
     await hass.async_stop(force=True)
+
+
+async def test_saved_preferences_follow_account_across_manager_reload_without_inventory_change(
+    manager,
+):
+    before = manager.store.data
+    initial = await manager.async_get_view_preferences("user-a")
+    assert initial == {"revision": 0, "views": [], "defaultViewId": ""}
+    result = await manager.async_save_view_preferences("user-a", saved_preferences(), 0)
+    assert result == {"revision": 1, **validate_preferences(saved_preferences())}
+    assert await manager.async_get_view_preferences("user-b") == initial
+    assert manager.store.data == before
+    reloaded = SetupCodesManager(manager.hass, SetupCodesStore(manager.hass))
+    await reloaded.async_setup()
+    try:
+        assert await reloaded.async_get_view_preferences("user-a") == result
+        assert await reloaded.async_get_view_preferences("user-b") == initial
+        assert reloaded.store.data == before
+    finally:
+        await reloaded.async_shutdown()
+
+
+async def test_concurrent_preferences_cas_rejects_stale_browser_but_not_other_accounts(manager):
+    results = await asyncio.gather(
+        manager.async_save_view_preferences("user-a", saved_preferences("First"), 0),
+        manager.async_save_view_preferences("user-a", saved_preferences("Second"), 0),
+        return_exceptions=True,
+    )
+    assert sum(isinstance(result, dict) for result in results) == 1
+    errors = [result for result in results if isinstance(result, InventoryError)]
+    assert len(errors) == 1 and errors[0].code == "preferences_conflict"
+    assert (await manager.async_get_view_preferences("user-a"))["revision"] == 1
+    other = await manager.async_save_view_preferences("user-b", saved_preferences("Other"), 0)
+    assert other["revision"] == 1
+    assert (await manager.async_get_view_preferences("user-a"))["views"][0]["name"] in (
+        "First",
+        "Second",
+    )
+
+
+async def test_concurrent_different_account_writes_merge_without_losing_either_account(manager):
+    first, second = await asyncio.gather(
+        manager.async_save_view_preferences("user-a", saved_preferences("First"), 0),
+        manager.async_save_view_preferences("user-b", saved_preferences("Second"), 0),
+    )
+    assert await manager.async_get_view_preferences("user-a") == first
+    assert await manager.async_get_view_preferences("user-b") == second
+    assert set(json.loads(manager.preferences_store.path.read_text())["data"]["users"]) == {
+        "user-a",
+        "user-b",
+    }
+
+
+@pytest.mark.parametrize("expected", [True, False, -1, 2**53, 2**63, 0.0, "0", None])
+async def test_preference_revisions_reject_invalid_types_without_writing(manager, expected):
+    with pytest.raises(ValueError):
+        await manager.async_save_view_preferences("user-a", saved_preferences(), expected)
+    assert not manager.preferences_store.path.exists()
+
+
+async def test_inventory_edits_and_preference_edits_have_independent_revisions_and_exports(manager):
+    await manager.async_save(new_record("Inventory only"), revision(manager))
+    before = {format: manager.export(format)["content"] for format in ("json", "csv")}
+    inventory_revision = revision(manager)
+    await manager.async_save_view_preferences("user-a", saved_preferences(), 0)
+    assert revision(manager) == inventory_revision
+    for format in ("json", "csv"):
+        assert manager.export(format)["content"] == before[format]
+        assert "defaultViewId" not in manager.export(format)["content"]
+    await manager.async_save(new_record("Second record"), inventory_revision)
+    assert (await manager.async_save_view_preferences("user-a", saved_preferences("Changed"), 1))[
+        "revision"
+    ] == 2
+
+
+async def test_preference_write_failure_preserves_previous_default_and_file(manager, monkeypatch):
+    before = await manager.async_save_view_preferences("user-a", saved_preferences(), 0)
+    disk_before = manager.preferences_store.path.read_bytes()
+
+    def fail(_data):
+        raise OSError("SYNTHETIC_PRIVATE_ERROR")
+
+    monkeypatch.setattr(manager.preferences_store, "_write", fail)
+    with pytest.raises(InventoryError, match="preferences_save_failed"):
+        await manager.async_save_view_preferences("user-a", {"views": [], "defaultViewId": ""}, 1)
+    assert await manager.async_get_view_preferences("user-a") == before
+    assert manager.preferences_store.path.read_bytes() == disk_before
+
+
+async def test_cancelled_preference_write_is_drained_before_shutdown_and_committed_once(
+    manager, monkeypatch
+):
+    entered, release = Event(), Event()
+    original = manager.preferences_store._write
+    events = []
+    unsub = manager.hass.bus.async_listen(
+        "setup_code_manager_updated", lambda event: events.append(event.data)
+    )
+
+    def blocked(data):
+        entered.set()
+        if not release.wait(timeout=5):
+            raise RuntimeError("Synthetic write not released")
+        original(data)
+
+    monkeypatch.setattr(manager.preferences_store, "_write", blocked)
+    task = asyncio.create_task(
+        manager.async_save_view_preferences("user-a", saved_preferences(), 0)
+    )
+    shutdown = None
+    try:
+        assert await asyncio.to_thread(entered.wait, 3)
+        task.cancel()
+        await asyncio.sleep(0)
+        task.cancel()
+        await asyncio.sleep(0)
+        shutdown = asyncio.create_task(manager.async_shutdown())
+        await asyncio.sleep(0)
+        assert not task.done()
+        assert not shutdown.done()
+        assert manager._lock.locked()
+    finally:
+        release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    await shutdown
+    await manager.hass.async_block_till_done()
+    unsub()
+    assert manager.preferences_store.get("user-a")["revision"] == 1
+    assert (
+        json.loads(manager.preferences_store.path.read_text())["data"]
+        == manager.preferences_store.data
+    )
+    assert events == [{}]
+    with pytest.raises(InventoryError, match="not_loaded"):
+        await manager.async_save_view_preferences("user-a", saved_preferences(), 1)
+    with pytest.raises(InventoryError, match="not_loaded"):
+        await manager.async_get_view_preferences("user-a")
 
 
 def add_device(manager, suffix="one", protocols=("matter",)):

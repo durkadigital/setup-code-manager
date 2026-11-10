@@ -1,14 +1,57 @@
 # Teststand und praktische Abnahme
 
 Dieser Teststand trennt lokale Prüfungen von Veröffentlichung und praktischer
-Abnahme. **0.1.0b9** korrigiert das Öffnen nativer Filterauswahlen und ergänzt
+Abnahme. **0.1.0b10** speichert Ansichten und Standard zentral pro HA-Konto.
+**0.1.0b9** korrigiert das Öffnen nativer Filterauswahlen und ergänzt
 Standardansichten. **0.1.0b8** ergänzt das Filter-Dropdown und die Inventarwerkzeuge.
-**0.1.0b7** wurde auf HA Core 2026.11.1 installiert und nach Neustart mit
-Codesuche, kombinierten Raum-/Protokoll-/Statusfiltern und Datenerhalt geprüft.
+**0.1.0b9** wurde auf HA Core 2026.11.1 installiert und nach Neustart und
+vollständigem Neuladen mit erhaltenen Einträgen und Standardansicht geprüft.
 Automatisierte Prüfungen verwenden synthetische Daten. Zusätzlich wurden ein
 reales QR-Foto lokal und die Fotoaufnahme auf dem Ziel-iPhone geprüft.
 Private Fotos und Codeinhalte werden nicht im Repository dokumentiert.
 Die vollständige praktische Abnahme steht aus.
+
+## Lokale Abschlussprüfung von 0.1.0b10 am 10. November 2026
+
+- **425 Python-Tests** und **242 JavaScript-Tests** bestanden.
+- Isolierter Lauf mit echtem **HA Core 2026.11.0 / Frontend 20261028.4**:
+  **17 Prüfungen** bestanden; alle **10** versionierten Web-Dateien antworteten
+  mit HTTP 200, keine Integrationsfehler. Abschluss des nach der Formatierung
+  wiederholten Laufs: **10. November 2026, 15:49:59 UTC**. Die Quelldateien blieben
+  während des Laufs unverändert. SHA-256 der getesteten Integrationsdateien:
+  `9ffe361bba4f4d0dfc8872e1bce17a006616b80762eac520a71971da30368d94`.
+- Browserprüfung in der lokalen Demo am Desktop und bei **390 × 844 Pixeln**:
+  Ansicht erstellen, Standard setzen und aufheben sowie nach Neuladen anwenden
+  bestanden. Ein vorübergehender Flur-Filter blieb bei einer Aktualisierung
+  erhalten. Verfügbare und gesperrte Speicheraktionen, Schließen per **Fertig**
+  und Escape sowie Darstellung ohne horizontales Überlaufen geprüft. Keine
+  Warnungen oder Fehler in der Browserkonsole. Die Demo simuliert den zentralen
+  Speicher mit synthetischen Daten.
+- Zwei unabhängige Panelinstanzen mit getrennten Browser-Speichern und einem
+  gemeinsamen Testserver prüfen denselben Ansichtskatalog und Standard pro Konto.
+  Andere Konten und HA-Instanzen bleiben getrennt. Alte Revisionen werden nicht
+  angewendet; Konflikte laden den aktuellen Katalog ohne Überschreibungsversuch.
+- Kontoübergänge sind abgesichert: Sofortiges Leeren des bisherigen Katalogs und
+  Sperren der Speicheraktionen, Zurücksetzen von Filtern und Suche sowie Ablehnen
+  verspäteter Speicherantworten. Ein Konto ohne Standard startet mit den normalen
+  Listeneinstellungen.
+- Migrationstests prüfen die vollständige Übernahme vorhandener lokaler v1-
+  Ansichten samt Standard nur bei zentraler Revision 0 und leerem Katalog.
+  Parallele Erstübernahmen lesen den Gewinner; ein bewusst geleerter zentraler
+  Katalog wird nicht wieder gefüllt. Die lokale Sicherung bleibt unverändert.
+  Zusätzliche lokale Ansichten werden nur ausdrücklich übernommen; der zentrale
+  Standard bleibt dabei bestehen.
+- Backendprüfungen decken die private, atomar geschriebene Einstellungsdatei,
+  Kontozugriff, Revisionen, Schreibfehler und die Trennung vom Inventar ab.
+  Die gespeicherten Auswahlwerte enthalten weder Suchtexte noch Codeinhalte.
+
+Die Einstellungsdatei `.storage/setup_code_manager_preferences` wird mit der
+HA-Konfiguration gesichert; Inventar und JSON-/CSV-Austauschformat bleiben
+unverändert. Dieser Stand ist noch nicht veröffentlicht oder im Zielsystem
+installiert. Die tatsächliche Synchronisierung eines HA-Kontos zwischen Mac und
+iPhone wird nach Installation gesondert geprüft. Physischer iPhone-Nachtest und
+vollständiger HA-Restore bleiben offen.
+[Versionshinweise](releases/0.1.0b10.md) · [Bedienung](USAGE.de.md).
 
 ## Lokale Abschlussprüfung von 0.1.0b9 am 10. November 2026
 
@@ -41,8 +84,11 @@ HA-Instanz und Konto. Suchtexte und Codeinhalte werden weiterhin nicht gespeiche
 
 Das Inventar- und Austauschformat bleibt unverändert. Die bisherige v1-Hülle für
 Ansichten erhält nur eine optionale Standard-ID; bestehende Ansichten bleiben
-ohne Migration erhalten. Dieser Stand ist noch nicht veröffentlicht und nicht im
-Zielsystem installiert. Die Abnahme auf dem physischen iPhone steht weiterhin aus.
+ohne Migration erhalten. Beta 9 wurde veröffentlicht und auf **HA Core 2026.11.1**
+installiert. Nach Neustart und vollständigem Neuladen waren alle **13 Einträge**
+weiterhin mit HA verknüpft und als **Code gespeichert** gekennzeichnet. Die
+Browser-Standardansicht **Home** wurde nach Neuladen geladen. Die Abnahme auf dem
+physischen iPhone steht weiterhin aus.
 [Versionshinweise](releases/0.1.0b9.md) · [Bedienung](USAGE.de.md).
 
 ## Lokale Abschlussprüfung von 0.1.0b8 am 10. November 2026

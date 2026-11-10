@@ -11,8 +11,15 @@ die eigene Installationskennung und den Bearbeitungsstand. Auch lokale
 Einstellungen zur unterdrückten Wiedererkennung ausdrücklich gelöschter Geräte
 liegen im Store.
 
+Seit Beta 10 liegen persönliche Ansichten und die Standardansicht getrennt in
+`<Home-Assistant-Konfiguration>/.storage/setup_code_manager_preferences`.
+Die Datei enthält Kontozuordnungen, Ansichtsfilter, Sortierung, Gruppierung und
+deren Bearbeitungsstände. Suchbegriffe, Notizen und Einrichtungscodes werden dort
+nicht gespeichert. Sie wird atomar mit privaten Dateirechten geschrieben; eine
+zusätzliche Verschlüsselung ergänzt die Integration nicht.
+
 Eine Home-Assistant-Sicherung, die **Home-Assistant-Einstellungen beziehungsweise
-den Konfigurationsordner** enthält, erfasst diese Ablage. Automatische Sicherungen
+den Konfigurationsordner** enthält, erfasst beide Ablagen. Automatische Sicherungen
 enthalten laut Home Assistant die Einstellungen. Bei einer gezielten Sicherung
 einer einzelnen App ohne HA-Konfiguration ist das Inventar nicht enthalten.
 Die Sensordatenbank muss für das Inventar nicht mitgesichert werden.
@@ -57,15 +64,17 @@ portablen Listenexport.
 ## Zwei Wiederherstellungswege
 
 1. **Gesamtes Home Assistant wiederherstellen:** Die HA-Konfiguration einschließlich
-   Geräte-Registry und Inventardatei gemeinsam aus der Sicherung zurückholen.
-   Anschließend Integration, Liste, Archiv und Verknüpfungen prüfen. Die installierte
+   Geräte-Registry, Inventardatei und persönliche Ansichten gemeinsam aus der
+   Sicherung zurückholen. Anschließend Integration, Liste, Archiv, Verknüpfungen
+   und Standardansicht im ursprünglichen HA-Konto prüfen. Die installierte
    Integration muss die gespeicherte Datenversion unterstützen.
 2. **Frisches Home Assistant, nur Inventar übernehmen:** Setup Code Manager
    installieren und JSON oder CSV importieren. Bei einer abweichenden
    Installationskennung werden alte HA-Verknüpfungen entfernt; Geräte und Codes
    bleiben erhalten. Anschließend passende Geräte neu zuordnen. Ein Listenimport
-   stellt weder Matter-Kopplungen noch Automationen oder die alte Geräte-Registry
-   wieder her.
+   stellt weder Matter-Kopplungen noch Automationen, die alte Geräte-Registry oder
+   persönliche Ansichten wieder her. Ansichten sind an die internen HA-Konto-IDs
+   gebunden; ein neu angelegtes Konto übernimmt keine Ansichten eines anderen Kontos.
 
 Der Import zeigt neue, unveränderte, widersprüchliche und ungültige Einträge vor
 der Übernahme. Wiederholte unveränderte Importe erzeugen keine Dubletten.
@@ -80,12 +89,14 @@ Ein vollständiger HA-Backup-/Restore-Lauf auf dem vorgesehenen Zielsystem ist
 noch als praktische Abnahme durchzuführen:
 
 1. Testgeräte mit mehreren Codearten, Notizen, führenden Nullen und Archivstatus
-   anlegen; mindestens ein Gerät ohne HA-Verknüpfung einschließen.
+   anlegen; mindestens ein Gerät ohne HA-Verknüpfung einschließen. Eine persönliche
+   Ansicht speichern und als Standard festlegen.
 2. Speichern, Home Assistant neu starten und die Einträge prüfen.
 3. Eine HA-Sicherung einschließlich Einstellungen erstellen und deren erfolgreichen
    Abschluss prüfen.
 4. In einer getrennten Testinstallation wiederherstellen und Inhalt sowie
-   Verknüpfungen vergleichen.
+   Verknüpfungen vergleichen. Im wiederhergestellten ursprünglichen HA-Konto
+   Ansichten und Standard prüfen; ein anderes Konto darf sie nicht übernehmen.
 5. Zusätzlich den JSON-/CSV-Import in einer frischen Installation prüfen:
    vollständiger Inhalt, keine ungeprüften alten Verknüpfungen, keine Dubletten
    beim zweiten Import.
@@ -93,14 +104,22 @@ noch als praktische Abnahme durchzuführen:
 Der erfolgreiche Export allein belegt keine erfolgreiche vollständige
 Wiederherstellung von Home Assistant.
 
-## Teilbestände und Browseransichten ab Beta 8
+## Teilbestände und persönliche Ansichten
 
 Der Export kann den Gesamtbestand, die aktuellen Treffer oder markierte Einträge
 enthalten. Teilbestände verwenden dasselbe JSON-/CSV-Format und lassen sich wieder
 importieren, ersetzen aber keine vollständige Inventarsicherung. Die neu aus HA
 abgeleiteten Etagen und Labels gehören nicht zur Inventardatei oder zum Export.
 
-Gespeicherte Ansichten sind persönliche Browser-Einstellungen, getrennt nach HA-
-Instanz und Konto. Sie enthalten Filter, Sortierung und Gruppierung, keine Codes
-oder Suchtexte. Sie werden nicht im HA-Backup oder Inventarexport mitgesichert.
+Die bis Beta 9 gespeicherten Browseransichten werden bei einem noch nie
+beschriebenen zentralen Konto automatisch übernommen. Die unveränderte lokale
+v1-Ablage im Browser-Speicher bleibt als Sicherung erhalten und gehört selbst nicht
+zum HA-Backup. Zusätzliche lokale Ansichten können bei bestehendem zentralem
+Katalog ausdrücklich übernommen werden; ein bewusst geleerter zentraler Katalog
+wird nicht automatisch wieder gefüllt.
+
+Ab Beta 10 gehören die zentral gespeicherten Ansichten und ihr Standard zur
+HA-Konfigurationssicherung. JSON-/CSV-Inventarexporte enthalten sie nicht.
+Beim gleichzeitigen Bearbeiten auf mehreren Geräten verhindern Revisionsprüfungen
+das stille Überschreiben eines neueren Katalogs.
 Druckausgaben und PDF-Dateien sind eigene lesbare Kopien der gewählten Codes.

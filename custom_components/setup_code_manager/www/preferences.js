@@ -41,6 +41,35 @@ export function normalizeViews(value) {
   return result;
 }
 
+/** Import local choices without replacing newer central entries or generating IDs. */
+export function mergeLocalViews(serverViews, localViews) {
+  const views = normalizeViews(serverViews);
+  const ids = new Set(views.map(view => view.id));
+  const names = new Set(views.map(view => view.name.toLowerCase()));
+  const signature = view => JSON.stringify([view.name.toLowerCase(),view.settings]);
+  const represented = new Set(views.map(signature)), localIds = new Set();
+  let added = 0, remaining = 0;
+  for (const raw of Array.isArray(localViews) ? localViews : []) {
+    // Normalize each candidate separately so overflow can be reported rather
+    // than disappearing at normalizeViews' normal 20-entry storage boundary.
+    const local = normalizeViews([raw])[0];
+    if (!local || localIds.has(local.id)) continue;
+    localIds.add(local.id);
+    if (ids.has(local.id) || represented.has(signature(local))) continue;
+    represented.add(signature(local));
+    if (views.length >= MAX_SAVED_VIEWS) { remaining++; continue; }
+    let name = local.name;
+    for (let index = 1; names.has(name.toLowerCase()); index++) {
+      const suffix = index === 1 ? ' (lokal)' : ` (lokal ${index})`;
+      name = [...local.name].slice(0,80 - suffix.length).join('').trimEnd() + suffix;
+    }
+    const imported = { ...local, name };
+    views.push(imported); ids.add(imported.id); names.add(name.toLowerCase()); represented.add(signature(imported));
+    added++;
+  }
+  return { views, added, remaining };
+}
+
 export function preferenceKey(instanceId, userId) {
   const valid = value => typeof value === 'string' && value.trim() && value.length <= 256
     && !/[\u0000-\u001f\u007f]/u.test(value);
@@ -49,7 +78,7 @@ export function preferenceKey(instanceId, userId) {
   catch { return null; }
 }
 
-function normalizeViewPreferences(value) {
+export function normalizeViewPreferences(value) {
   const input = object(value), views = normalizeViews(input.views), id = safeId(input.defaultViewId);
   return { views, defaultViewId:views.some(view => view.id === id) ? id : '' };
 }

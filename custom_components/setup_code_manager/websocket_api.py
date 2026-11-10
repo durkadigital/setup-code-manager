@@ -56,7 +56,30 @@ _REVISION = {vol.Required("expected_revision"): _revision}
 
 @_endpoint("list")
 async def ws_list(manager, connection, msg):
-    return manager.list_data()
+    try:
+        preferences = await manager.async_get_view_preferences(connection.user.id)
+    except InventoryError as err:
+        # Preferences are independent from the valuable code inventory.
+        result = manager.list_data()
+        result["view_preferences_error"] = err.code
+    else:
+        # The preference read may wait for a pending manager write. Take the
+        # inventory snapshot afterwards, so it includes that completed write.
+        result = manager.list_data()
+        result["view_preferences"] = preferences
+    return result
+
+
+@_endpoint("view_preferences")
+async def ws_view_preferences(manager, connection, msg):
+    return await manager.async_get_view_preferences(connection.user.id)
+
+
+@_endpoint("save_view_preferences", {vol.Required("preferences"): dict, **_REVISION})
+async def ws_save_view_preferences(manager, connection, msg):
+    return await manager.async_save_view_preferences(
+        connection.user.id, msg["preferences"], msg["expected_revision"]
+    )
 
 
 @_endpoint("ha_devices")
@@ -124,6 +147,8 @@ async def ws_import(manager, connection, msg):
 def async_register(hass: HomeAssistant) -> None:
     for command in (
         ws_list,
+        ws_view_preferences,
+        ws_save_view_preferences,
         ws_ha_devices,
         ws_sync,
         ws_save,

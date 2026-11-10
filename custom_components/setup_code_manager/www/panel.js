@@ -3,7 +3,7 @@ import { translator, protocolNames } from './i18n.js';
 import { icon, deviceIcon } from './icons.js';
 import { startScanner, scanImage } from './scanner.js';
 import { filterRecords, availableRooms, availableFloors, availableLabels, groupRecordsByRoom, SORTS } from './filters.js';
-import { sanitizeViewSettings, preferenceKey, loadViewPreferences, saveViewPreferences, saveViews, MAX_SAVED_VIEWS } from './preferences.js';
+import { sanitizeViewSettings, preferenceKey, loadViewPreferences, normalizeViewPreferences, mergeLocalViews, MAX_SAVED_VIEWS } from './preferences.js';
 import { printDeviceCards, MAX_PRINT_RECORDS } from './print.js';
 import './qr.js';
 
@@ -30,6 +30,7 @@ class SetupCodeManagerPanel extends HTMLElement {
     this._tab = 'all'; this._query = ''; this._protocol = ''; this._codeStatusFilter = 'all'; this._room = '';
     this._floor = ''; this._label = ''; this._sort = 'name-asc'; this._group = 'none'; this._filtersOpen = false; this._advancedFiltersOpen = false; this._viewsOpen = false;
     this._savedViews = []; this._defaultViewId = ''; this._activeViewId = ''; this._viewName = ''; this._preferenceScope = null;
+    this._viewsRevision = -1; this._viewsReady = false; this._viewsBusy = false; this._viewsLoadError = ''; this._appliedPreferenceScope = null; this._legacyPreferences = {views:[],defaultViewId:''};
     this._selection = new Set(); this._selecting = false; this._collapsedGroups = new Set();
     this._revealed = new Set(); this._revealedManual = new Set(); this._formRevealed = new Set(); this._compareRevealed = new Set();
     this._loading = true; this._busy = false; this._loadSequence = 0; this._dialogGeneration = 0;
@@ -52,9 +53,20 @@ class SetupCodeManagerPanel extends HTMLElement {
   }
   set hass(value) {
     const languageChanged = this._hass?.language !== value?.language;
+    const userChanged = this._hass?.user?.id !== value?.user?.id;
     this._hass = value;
     this._t = translator(value?.language);
+    if (userChanged && this._started) {
+      this._preferenceScope = null; this._appliedPreferenceScope = null; this._viewsReady = false; this._viewsBusy = false;
+      this._viewsWriteSequence = (this._viewsWriteSequence || 0) + 1; this._viewMigration = null;
+      this._savedViews = []; this._defaultViewId = ''; this._activeViewId = ''; this._viewName = ''; this._legacyPreferences = {views:[],defaultViewId:''};
+      const defaults = sanitizeViewSettings({});
+      this._tab = defaults.tab; this._protocol = defaults.protocol; this._codeStatusFilter = defaults.codeStatus; this._room = defaults.room; this._floor = defaults.floor; this._label = defaults.label; this._sort = defaults.sort; this._group = defaults.group;
+      this._query = ''; this._selection.clear(); this._selectedId = null; this._collapsedGroups.clear(); this._revealed.clear(); this._revealedManual.clear();
+      this._closeFilters(); this._renderMain();
+    }
     if (languageChanged && this._started) { this._renderMain(); if (this._modal?.kind !== 'scanner') this._renderModal(); }
+    if (userChanged && this._started) this._refresh(false);
     this._start();
   }
   get hass() { return this._hass; }
@@ -66,6 +78,7 @@ class SetupCodeManagerPanel extends HTMLElement {
     globalThis.document?.removeEventListener?.('pointerdown',this._outsideFilters,true); window.removeEventListener?.('resize',this._resizeFilters);
     this._closeFilters(); this._captureQueue = null; this._printRecords = null; this._printNotes = false; this._selection.clear(); this._selectedId = null;
     this._connected = false; this._started = false; this._loadSequence++; this._refreshRequest = null; this._dialogGeneration++; this._draft = null; this._modal = null; this._busy = false;
+    this._appliedPreferenceScope = null; this._viewsBusy = false; this._viewMigration = null; this._viewsWriteSequence = (this._viewsWriteSequence || 0) + 1;
     this._revealed.clear(); this._revealedManual.clear();
     this._unsubscribe?.(); this._unsubscribe = null;
     clearTimeout(this._eventTimer); clearTimeout(this._toastTimer);
@@ -99,13 +112,17 @@ class SetupCodeManagerPanel extends HTMLElement {
     return this._connected && latest?.sequence > sequence ? latest.promise : undefined;
   }
   async _runRefresh(sequence,showLoading) {
+    const userId = this._hass?.user?.id;
     if (showLoading && !this._devices.length) { this._loading = true; this._renderMain(); }
     try {
       const result = await this._api('list');
-      if (!this._connected) return;
+      if (!this._connected || this._hass?.user?.id !== userId) return;
+      if (sequence !== this._loadSequence) return this._latestRefreshResult(sequence);
+      this._instance = result.instance_id;
+      await this._loadViewPreferences(result.view_preferences,result.view_preferences_error);
+      if (!this._connected || this._hass?.user?.id !== userId) return;
       if (sequence !== this._loadSequence) return this._latestRefreshResult(sequence);
       this._devices = result.devices || []; this._revision = result.revision;
-      this._instance = result.instance_id; this._loadViewPreferences();
       const currentIds = new Set(this._devices.map(record => record.id)); this._selection = new Set([...this._selection].filter(id => currentIds.has(id)));
       this._loadError = ''; this._loading = false;
       const previousIdentity = this._draft && JSON.stringify([this._draft.name,this._draft.location]);
@@ -123,7 +140,10 @@ class SetupCodeManagerPanel extends HTMLElement {
     const map = { conflict:'revisionConflict', device_removed:'deviceRemoved', duplicate_link:'duplicateLink', archived_target:'archivedTarget', invalid_code:'invalidCode', validation_error:'validationError', unauthorized:'accessDenied', not_allowed:'accessDenied', forbidden:'accessDenied', save_failed:'saveFailed', not_loaded:'loadFailed', insecure_context:'cameraSecure', camera_denied:'cameraDenied', camera_unavailable:'cameraMissing', unsupported_code:'unsupportedQR', image_too_large:'imageTooLarge', image_unreadable:'imageUnreadable', unsupported_image:'unsupportedImage', decoder_unavailable:'decoderMissing', preview_expired:'previewExpired' };
     return this._t(map[error?.code] || fallback);
   }
-  _busyBlocks(action) { return this._busy && !(this._readingPhoto && action === 'close-modal'); }
+  _busyBlocks(action) {
+    if (['save-view','delete-view','set-default-view','clear-default-view','import-local-views'].includes(action) && (!this._viewsReady || this._viewsBusy)) return true;
+    return this._busy && !(this._readingPhoto && action === 'close-modal');
+  }
   _button(action, label, image = '', style = '', attrs = '') {
     return `<button type="button" class="button ${style}" data-action="${action}" ${attrs} ${this._busyBlocks(action) ? 'disabled' : ''}>${image ? icon(image) : ''}${esc(label)}</button>`;
   }
@@ -151,24 +171,82 @@ class SetupCodeManagerPanel extends HTMLElement {
     return sanitizeViewSettings({tab:this._tab, protocol:this._protocol, codeStatus:this._codeStatusFilter, room:this._room, floor:this._floor, label:this._label, sort:this._sort, group:this._group});
   }
   _viewStorage() { try { return window.localStorage; } catch { return null; } }
-  _loadViewPreferences() {
-    const key = preferenceKey(this._instance, this._hass?.user?.id);
-    if (key === this._preferenceScope) return;
-    this._preferenceScope = key; this._activeViewId = ''; this._viewName = '';
-    const preferences = loadViewPreferences(this._viewStorage(), this._instance, this._hass?.user?.id);
-    this._savedViews = preferences.views; this._defaultViewId = preferences.defaultViewId;
-    if (key && this._defaultViewId) this._applyView(this._defaultViewId, false);
+  async _loadViewPreferences(server, error = '') {
+    const scope = preferenceKey(this._instance,this._hass?.user?.id);
+    if (scope !== this._preferenceScope) {
+      this._preferenceScope = scope; this._activeViewId = ''; this._viewName = '';
+      this._viewsRevision = -1; this._viewsReady = false; this._viewsBusy = false;
+      this._viewsWriteSequence = (this._viewsWriteSequence || 0) + 1;
+      this._legacyPreferences = loadViewPreferences(this._viewStorage(),this._instance,this._hass?.user?.id);
+      this._savedViews = []; this._defaultViewId = ''; this._viewMigration = null;
+    }
+    if (!scope) return;
+    if (error || !server || !Number.isSafeInteger(server.revision) || server.revision < 0) {
+      this._viewsReady = false; this._viewsLoadError = this._t('viewLoadFailed'); return;
+    }
+    if (server.revision < this._viewsRevision) return;
+    // Only a never-written account is auto-migrated. A cleared central account
+    // must not resurrect the untouched legacy browser backup on the next load.
+    if (server.revision === 0 && !server.views?.length && this._legacyPreferences.views.length) {
+      if (this._viewMigration?.scope !== scope) {
+        const preferences = clone(this._legacyPreferences);
+        const promise = this._api('save_view_preferences',{preferences,expected_revision:0}).catch(err => {
+          if (['conflict','preferences_conflict'].includes(err?.code)) return this._api('view_preferences');
+          throw err;
+        });
+        this._viewMigration = {scope,promise};
+      }
+      try { server = await this._viewMigration.promise; }
+      catch {
+        if (this._connected && this._preferenceScope === scope) { this._viewsReady = false; this._viewsLoadError = this._t('viewMigrationFailed'); this._viewMigration = null; }
+        return;
+      }
+    }
+    if (!this._connected || this._preferenceScope !== scope || preferenceKey(this._instance,this._hass?.user?.id) !== scope) return;
+    this._acceptViewPreferences(server);
+    if (this._viewsReady && this._appliedPreferenceScope !== scope) {
+      this._appliedPreferenceScope = scope;
+      if (this._defaultViewId) this._applyView(this._defaultViewId,false);
+    }
   }
-  _saveView() {
+  _acceptViewPreferences(server) {
+    if (!server || !Number.isSafeInteger(server.revision) || server.revision < 0 || server.revision < this._viewsRevision) return false;
+    const preferences = normalizeViewPreferences(server);
+    this._savedViews = preferences.views; this._defaultViewId = preferences.defaultViewId;
+    this._viewsRevision = server.revision; this._viewsReady = true; this._viewsLoadError = '';
+    if (this._activeViewId && !this._savedViews.some(view => view.id === this._activeViewId)) { this._activeViewId = ''; this._viewName = ''; }
+    return true;
+  }
+  async _persistViews(views,defaultViewId) {
+    if (!this._viewsReady || this._viewsBusy || !this._preferenceScope) return false;
+    const scope = this._preferenceScope, sequence = this._viewsWriteSequence = (this._viewsWriteSequence || 0) + 1;
+    const current = () => this._connected && this._preferenceScope === scope && preferenceKey(this._instance,this._hass?.user?.id) === scope && this._viewsWriteSequence === sequence;
+    this._viewsBusy = true; this._renderMain();
+    try {
+      const result = await this._api('save_view_preferences',{preferences:{views:clone(views),defaultViewId},expected_revision:this._viewsRevision});
+      if (!current()) return false;
+      return this._acceptViewPreferences(result);
+    } catch (error) {
+      if (!current()) return false;
+      if (['conflict','preferences_conflict'].includes(error?.code)) {
+        try { const latest = await this._api('view_preferences'); if (current()) this._acceptViewPreferences(latest); } catch { /* Keep the last known catalog and report the conflict. */ }
+        if (current()) this._toast(this._t('viewConflict'));
+      } else this._toast(this._t('viewStorageFailed'));
+      return false;
+    } finally {
+      if (current()) { this._viewsBusy = false; this._renderMain(); }
+    }
+  }
+  async _saveView() {
     const name = this._viewName.trim();
     if (!name) { this._toast(this._t('viewNameRequired')); return; }
     const existing = this._savedViews.find(view => view.id === this._activeViewId && view.name === name);
     if (this._savedViews.some(view => view.id !== existing?.id && view.name.toLocaleLowerCase() === name.toLocaleLowerCase())) { this._toast(this._t('viewNameExists')); return; }
     if (!existing && this._savedViews.length >= MAX_SAVED_VIEWS) { this._toast(this._t('viewLimit')); return; }
-    const view = {id:existing?.id || uid(), name, settings:this._viewSettings()};
+    const view = {id:existing?.id || uid(),name,settings:this._viewSettings()};
     const views = existing ? this._savedViews.map(item => item.id === existing.id ? view : item) : [...this._savedViews,view];
-    if (!saveViews(this._viewStorage(),this._instance,this._hass?.user?.id,views)) { this._toast(this._t('viewStorageFailed')); return; }
-    this._savedViews = views; this._activeViewId = view.id; this._renderMain(); this.shadowRoot.querySelector('[data-field="view-name"]')?.focus({preventScroll:true}); this._toast(this._t('viewSaved'));
+    if (!await this._persistViews(views,this._defaultViewId)) return;
+    this._activeViewId = view.id; this._viewName = view.name; this._renderMain(); this.shadowRoot.querySelector('[data-field="view-name"]')?.focus({preventScroll:true}); this._toast(this._t('viewSaved'));
   }
   _applyView(id, render = true) {
     const view = this._savedViews.find(item => item.id === id);
@@ -178,22 +256,24 @@ class SetupCodeManagerPanel extends HTMLElement {
     this._query = ''; this._activeViewId = view.id; this._viewName = view.name; this._advancedFiltersOpen = !!(s.floor || s.label || s.group !== 'none');
     this._selection.clear(); this._selectedId = null; this._collapsedGroups.clear(); if (render) this._renderMain();
   }
-  _deleteView() {
+  async _deleteView() {
     const view = this._savedViews.find(item => item.id === this._activeViewId);
     if (!view || !window.confirm(this._t('deleteViewConfirm',{name:view.name}))) return;
     const views = this._savedViews.filter(item => item.id !== view.id);
-    if (!saveViews(this._viewStorage(),this._instance,this._hass?.user?.id,views)) { this._toast(this._t('viewStorageFailed')); return; }
-    this._savedViews = views; if (this._defaultViewId === view.id) this._defaultViewId = '';
+    if (!await this._persistViews(views,this._defaultViewId === view.id ? '' : this._defaultViewId)) return;
     this._activeViewId = ''; this._viewName = ''; this._renderMain();
   }
-  _setDefaultView() {
+  async _setDefaultView() {
     if (!this._savedViews.some(view => view.id === this._activeViewId)) return;
-    this._persistDefaultView(this._activeViewId);
+    await this._persistDefaultView(this._activeViewId);
   }
-  _clearDefaultView() { this._persistDefaultView(''); }
-  _persistDefaultView(id) {
-    if (!saveViewPreferences(this._viewStorage(),this._instance,this._hass?.user?.id,{views:this._savedViews,defaultViewId:id})) { this._toast(this._t('viewStorageFailed')); return; }
-    this._defaultViewId = id; this._renderMain(); this._toast(this._t(id ? 'defaultViewSaved' : 'defaultViewCleared'));
+  async _clearDefaultView() { await this._persistDefaultView(''); }
+  async _persistDefaultView(id) {
+    if (await this._persistViews(this._savedViews,id)) this._toast(this._t(id ? 'defaultViewSaved' : 'defaultViewCleared'));
+  }
+  async _importLocalViews() {
+    const merged = mergeLocalViews(this._savedViews,this._legacyPreferences.views);
+    if (merged.added && await this._persistViews(merged.views,this._defaultViewId)) this._toast(this._t(merged.remaining ? 'localViewsPartial' : 'localViewsImported',{count:merged.added}));
   }
   _visibleDevices() {
     return filterRecords(this._devices, {...this._viewSettings(),query:this._query}, this._hass?.language);
@@ -211,11 +291,12 @@ class SetupCodeManagerPanel extends HTMLElement {
   }
   _hasFilters() { return !!(this._query.trim() || this._structuredFilters().length); }
   _selectField(field,label,choices,value) {
-    return `<label class="filter-field"><span>${esc(label)}</span><select data-field="${field}" data-focus="${field}">${choices.map(([id,name]) => `<option value="${esc(id)}" ${value === id ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select></label>`;
+    return `<label class="filter-field"><span>${esc(label)}</span><select data-field="${field}" data-focus="${field}" ${field === 'saved-view' && (!this._viewsReady || this._viewsBusy) ? 'disabled' : ''}>${choices.map(([id,name]) => `<option value="${esc(id)}" ${value === id ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select></label>`;
   }
   _inlineFilters() { return (this.getBoundingClientRect?.().width || window.innerWidth || 1200) <= 800; }
   _renderFilters(count,total) {
     const t = this._t, chips = this._structuredFilters();
+    const localViews = mergeLocalViews(this._savedViews,this._legacyPreferences.views);
     const rooms = availableRooms(this._devices,this._hass?.language);
     if (this._room.startsWith('room:') && !rooms.includes(this._room.slice(5))) rooms.push(this._room.slice(5));
     const metadataChoices = (items,prefix,selection,all,none,unknown) => {
@@ -237,8 +318,9 @@ class SetupCodeManagerPanel extends HTMLElement {
       </div>
       <details id="saved-views" class="filter-disclosure saved-views" ${this._viewsOpen ? 'open' : ''}><summary>${esc(t('savedViews'))}${this._savedViews.length ? ` (${this._savedViews.length})` : ''}</summary><div class="saved-view-fields">
         ${this._selectField('saved-view',t('savedViews'),[['',t('chooseView')],...this._savedViews.map(view => [view.id,view.id === this._defaultViewId ? `${view.name} (${t('defaultView')})` : view.name])],this._activeViewId)}
-        <label class="filter-field"><span>${esc(t('viewName'))}</span><input data-field="view-name" data-focus="view-name" maxlength="80" value="${esc(this._viewName)}" autocomplete="off"></label>
-        <div id="view-actions" class="view-actions">${this._button('save-view',t(this._savedViews.some(view => view.id === this._activeViewId && view.name === this._viewName.trim()) ? 'updateView' : 'saveView'),'','text')}${this._activeViewId ? this._button('delete-view',t('deleteView'),'','text') : ''}${this._activeViewId && this._activeViewId !== this._defaultViewId ? this._button('set-default-view',t('setDefaultView'),'','text') : ''}${this._defaultViewId ? this._button('clear-default-view',t('clearDefaultView'),'','text') : ''}</div>
+        <label class="filter-field"><span>${esc(t('viewName'))}</span><input data-field="view-name" data-focus="view-name" maxlength="80" value="${esc(this._viewName)}" autocomplete="off" ${!this._viewsReady || this._viewsBusy ? 'disabled' : ''}></label>
+        <div id="view-actions" class="view-actions">${this._button('save-view',t(this._savedViews.some(view => view.id === this._activeViewId && view.name === this._viewName.trim()) ? 'updateView' : 'saveView'),'','text')}${this._activeViewId ? this._button('delete-view',t('deleteView'),'','text') : ''}${this._activeViewId && this._activeViewId !== this._defaultViewId ? this._button('set-default-view',t('setDefaultView'),'','text') : ''}${this._defaultViewId ? this._button('clear-default-view',t('clearDefaultView'),'','text') : ''}${localViews.added ? this._button('import-local-views',t('importLocalViews',{count:localViews.added}),'','text') : ''}</div>
+        <p id="views-load-status" class="small muted" role="status" ${this._viewsLoadError || this._viewsBusy ? '' : 'hidden'}>${esc(this._viewsLoadError || t('viewsSaving'))}</p>
         <p id="default-view-status" class="small muted" ${this._defaultViewId ? '' : 'hidden'}>${esc(t('defaultViewHint',{name:this._savedViews.find(view => view.id === this._defaultViewId)?.name || ''}))}</p>
         <p class="small muted">${esc(t('viewStorageHint'))}</p>
       </div></details>
@@ -275,6 +357,7 @@ class SetupCodeManagerPanel extends HTMLElement {
         if (activeSelect) this._filterControlsPending = true;
         else el.value = next.value;
       }
+      if (el.disabled !== next.disabled) el.disabled = next.disabled;
       for (const attr of ['aria-label','placeholder']) {
         const value = next.getAttribute(attr);
         if (value !== null) el.setAttribute(attr,value);
@@ -283,7 +366,7 @@ class SetupCodeManagerPanel extends HTMLElement {
       const nextLabel = next.parentElement?.querySelector('span');
       if (label && nextLabel) label.textContent = nextLabel.textContent;
     }
-    for (const selector of ['#active-filter-chips','#list-action-summary','#view-actions','#default-view-status','.filter-panel-heading','.filter-footer','#advanced-filters > summary','#saved-views > summary','#advanced-filters p','#saved-views .saved-view-fields > p:last-child']) {
+    for (const selector of ['#active-filter-chips','#list-action-summary','#view-actions','#views-load-status','#default-view-status','.filter-panel-heading','.filter-footer','#advanced-filters > summary','#saved-views > summary','#advanced-filters p','#saved-views .saved-view-fields > p:last-child']) {
       const el = root.querySelector(selector), next = desired.querySelector(selector);
       if (!el || !next) continue;
       el.innerHTML = next.innerHTML; el.hidden = next.hidden;
@@ -929,10 +1012,11 @@ class SetupCodeManagerPanel extends HTMLElement {
       else if (action === 'close-filters') this._closeFilters(true);
       else if (action === 'reset-filters') this._resetFilters();
       else if (action === 'remove-filter') { const fields = {room:'_room',floor:'_floor',label:'_label',protocol:'_protocol',status:'_codeStatusFilter'}; const field = fields[button.dataset.filter]; if (field) { this[field] = field === '_codeStatusFilter' ? 'all' : ''; this._selection.clear(); this._renderMain(); this.shadowRoot.querySelector('[data-action="toggle-filters"]')?.focus({preventScroll:true}); } }
-      else if (action === 'save-view') this._saveView();
-      else if (action === 'delete-view') this._deleteView();
-      else if (action === 'set-default-view') this._setDefaultView();
-      else if (action === 'clear-default-view') this._clearDefaultView();
+      else if (action === 'save-view') await this._saveView();
+      else if (action === 'delete-view') await this._deleteView();
+      else if (action === 'set-default-view') await this._setDefaultView();
+      else if (action === 'clear-default-view') await this._clearDefaultView();
+      else if (action === 'import-local-views') await this._importLocalViews();
       else if (action === 'toggle-group') { const key = button.dataset.group; this._collapsedGroups.has(key) ? this._collapsedGroups.delete(key) : this._collapsedGroups.add(key); this._renderMain(); }
       else if (action === 'toggle-selection') { this._selecting = !this._selecting; this._selection.clear(); this._renderMain(); }
       else if (action === 'toggle-record') { this._selection.has(id) ? this._selection.delete(id) : this._selection.add(id); this._renderMain(); }

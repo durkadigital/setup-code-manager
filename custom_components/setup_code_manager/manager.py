@@ -21,6 +21,12 @@ from homeassistant.helpers.debounce import Debouncer
 
 from .const import EVENT_UPDATED, REFRESH_COOLDOWN
 from .inventory import MAX_RECORDS, RECORD_FIELDS, _identifier, new_record, validate_record
+from .preferences import (
+    MAX_REVISION,
+    ViewPreferencesStore,
+    validate_preferences,
+    validate_revision,
+)
 from .protocols import registry_devices, scan_all
 from .status import (
     device_identity,
@@ -49,9 +55,18 @@ def _now() -> str:
 
 
 class SetupCodesManager:
-    def __init__(self, hass: HomeAssistant, store: SetupCodesStore) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        store: SetupCodesStore,
+        preferences_store: ViewPreferencesStore | None = None,
+    ) -> None:
         self.hass = hass
         self.store = store
+        self.preferences_store = (
+            preferences_store if preferences_store is not None else ViewPreferencesStore(hass)
+        )
+        self._view_preferences_error = False
         self._lock = asyncio.Lock()
         self._closing = False
         self._unsubs: list[Any] = []
@@ -62,6 +77,13 @@ class SetupCodesManager:
 
     async def async_setup(self) -> None:
         await self.store.async_load()
+        try:
+            await self.preferences_store.async_load()
+        except Exception:
+            # A damaged preferences file must neither block access to codes nor
+            # be overwritten with an empty set of views. Keep the error local.
+            self._view_preferences_error = True
+            _LOGGER.warning("Saved view preferences are unavailable; inventory remains accessible")
         self.legacy_available = await self.hass.async_add_executor_job(self.legacy_path.is_file)
         await self.async_sync()
         self._debouncer = Debouncer(
@@ -130,6 +152,45 @@ class SetupCodesManager:
             "legacy_available": self.legacy_available,
             "devices": [serialize_record(self.hass, r) for r in data["devices"]],
         }
+
+    def _check_preferences_available(self) -> None:
+        if self._closing:
+            raise InventoryError("not_loaded")
+        if self._view_preferences_error:
+            raise InventoryError("preferences_unavailable")
+
+    async def async_get_view_preferences(self, user_id: str) -> dict[str, Any]:
+        """Return only the authenticated account's saved views, never other users."""
+        async with self._lock:
+            self._check_preferences_available()
+            return self.preferences_store.get(user_id)
+
+    async def async_save_view_preferences(
+        self, user_id: str, preferences: dict[str, Any], expected_revision: int
+    ) -> dict[str, Any]:
+        """CAS account preferences without changing the inventory revision."""
+        validated = validate_preferences(preferences)
+        expected_revision = validate_revision(expected_revision)
+        async with self._lock:
+            self._check_preferences_available()
+            current = self.preferences_store.get(user_id)
+            if expected_revision != current["revision"]:
+                raise InventoryError("preferences_conflict")
+            if current["revision"] == MAX_REVISION:
+                raise InventoryError("preferences_save_failed")
+            result = {"revision": current["revision"] + 1, **validated}
+            data = self.preferences_store.data
+            data["users"][user_id] = result
+            try:
+                await self.preferences_store.async_commit(data)
+            except asyncio.CancelledError:
+                if self.preferences_store.get(user_id)["revision"] == result["revision"]:
+                    self._notify()
+                raise
+            except Exception as err:
+                raise InventoryError("preferences_save_failed") from err
+            self._notify()
+            return self.preferences_store.get(user_id)
 
     def _area_name(self, area_id: str | None) -> str:
         area = ar.async_get(self.hass).async_get_area(area_id) if area_id else None

@@ -21,6 +21,7 @@ class Node {
   set hidden(value) { value ? this.setAttribute('hidden','') : this.removeAttribute('hidden'); }
   get classList() { const self=this; return {contains:name=>(self.getAttribute('class')||'').split(/\s+/).includes(name),toggle(name,force){const classes=new Set((self.getAttribute('class')||'').split(/\s+/).filter(Boolean));const add=force===undefined?!classes.has(name):force;add?classes.add(name):classes.delete(name);self.setAttribute('class',[...classes].join(' '));return add;},add(...names){for(const name of names)this.toggle(name,true);},remove(...names){for(const name of names)this.toggle(name,false);}}; }
   get disabled() { return this.attributes.has('disabled'); }
+  set disabled(value) { value ? this.setAttribute('disabled','') : this.removeAttribute('disabled'); }
   get isConnected() { return this === this.state.root || !!this.parentNode?.isConnected; }
   get value() { if (this.localName === 'select') return (this.options.find(option => option.selected) || (!this._noSelection && this.options[0]))?.value || ''; return this._value ?? this.getAttribute('value') ?? ''; }
   set value(value) { this._value = String(value); if (this.localName === 'select') { for (const option of this.options) option.selected = option.value === this._value; this._noSelection = !this.options.some(option => option.selected); } }

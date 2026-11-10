@@ -4,6 +4,7 @@ import asyncio
 import posixpath
 import re
 import shutil
+from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from urllib.parse import urljoin
@@ -28,7 +29,8 @@ from custom_components.setup_code_manager.const import (
     PANEL_URL_PATH,
 )
 from custom_components.setup_code_manager.inventory import new_record
-from custom_components.setup_code_manager.manager import SetupCodesManager
+from custom_components.setup_code_manager.manager import InventoryError, SetupCodesManager
+from custom_components.setup_code_manager.preferences import STORAGE_KEY as PREFERENCES_STORAGE_KEY
 from custom_components.setup_code_manager.store import SetupCodesStore
 
 
@@ -72,6 +74,14 @@ async def test_setup_unload_and_reload_keep_data_and_clean_up_callbacks(hass):
     assert isinstance(manager, SetupCodesManager)
     assert frontend.async_panel_exists(hass, PANEL_URL_PATH)
     await manager.async_save(new_record("Survives reload"), manager.store.data["revision"])
+    preferences = await manager.async_save_view_preferences(
+        "user-a",
+        {
+            "views": [{"id": "home", "name": "Home", "settings": {"group": "room"}}],
+            "defaultViewId": "home",
+        },
+        0,
+    )
     before = manager.store.data
     assert entry.update_listeners
 
@@ -89,7 +99,25 @@ async def test_setup_unload_and_reload_keep_data_and_clean_up_callbacks(hass):
     reloaded = hass.data[DOMAIN]
     assert reloaded is not manager
     assert reloaded.store.data == before
+    assert await reloaded.async_get_view_preferences("user-a") == preferences
+    assert (await reloaded.async_get_view_preferences("other-user"))["views"] == []
     assert frontend.async_panel_exists(hass, PANEL_URL_PATH)
+
+
+async def test_corrupt_preferences_do_not_block_inventory_and_are_never_overwritten(hass):
+    path = Path(hass.config.path(".storage", PREFERENCES_STORAGE_KEY))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{SYNTHETIC_CORRUPTION")
+    entry = add_entry(hass)
+    assert await integration.async_setup_entry(hass, entry)
+    manager = hass.data[DOMAIN]
+    await manager.async_save(new_record("Inventory remains usable"), manager.store.data["revision"])
+    assert len(manager.list_data()["devices"]) == 1
+    with pytest.raises(InventoryError, match="preferences_unavailable"):
+        await manager.async_get_view_preferences("user-a")
+    with pytest.raises(InventoryError, match="preferences_unavailable"):
+        await manager.async_save_view_preferences("user-a", {"views": [], "defaultViewId": ""}, 0)
+    assert path.read_text() == "{SYNTHETIC_CORRUPTION"
 
 
 async def test_panel_failure_releases_manager_listeners(hass):
