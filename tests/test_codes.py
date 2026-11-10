@@ -291,3 +291,18 @@ def test_zwave_rejects_invalid_structure_even_with_valid_checksum(fields):
 def test_zwave_unknown_noncritical_tlv_is_preserved():
     code = zwave_qr(tlv="001000001000010220000010000200003002569803123")
     assert normalize_setup_code("zwave", code) == code
+
+
+@pytest.mark.parametrize(
+    ("qr", "manual"),
+    [
+        ("MT:00000CQM00KA0648G00", "34970112332"),
+        ("MT:A3L90ARR15G6N57Y900", "745492075300001000013"),
+        ("MT:MZWA6G6026O2XP0II00", "619156140465523329207"),
+        ("MT:EPX0482F26DAVY09R10", "403732495800069000166"),
+    ],
+)
+def test_manual_matter_codes_match_official_chip_vectors(qr, manual):
+    # project-chip/connectedhomeip/src/setup_payload/tests/run_python_setup_payload_test.py
+    assert manual_pairing_code_from_mt(qr) == manual
+    assert normalize_setup_code("matter", manual) == manual

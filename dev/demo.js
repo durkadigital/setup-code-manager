@@ -9,6 +9,7 @@ const INSTANCE = 'synthetic-local-preview';
 const fields = ['id','name','manufacturer','model','serial_number','location','notes','archived','created_at','updated_at','links','source_refs'];
 const csvFields = ['format','schema_version','instance_id','revision','row_type',...fields,'code_id','protocol','value','label'];
 const code = (id,protocol,value) => ({id,protocol,value,label:'Originalcode'});
+const storedCode = ({id,protocol,value,label}) => ({id,protocol,value,label});
 const record = (id,name,location,manufacturer,model,codes,links=[],archived=false) => ({id,name,location,manufacturer,model,serial_number:'',notes:id === 'demo-1' ? 'Aufkleber auf der Unterseite.' : '',codes,links:links.map(ha_device_id => ({ha_device_id})),archived,created_at:'2026-11-07T10:00:00+00:00',updated_at:'2026-11-07T10:00:00+00:00',source_refs:[]});
 const initial = [
   record('demo-1','Steckdose Sofa','Wohnzimmer','Eve','Energy',[code('c-1','matter',MATTER),code('c-2','homekit',HOMEKIT)],['ha-1']),
@@ -37,15 +38,31 @@ if (new URLSearchParams(location.search).get('layout-test') === 'long') {
   initial[0].model = 'Beispielmodell '.repeat(24).slice(0, 256);
   initial[0].notes = 'Lange synthetische Notiz für den Scrolltest.\n'.repeat(30);
   initial[0].codes.push(code('c-long', 'zwave', DSK));
+  haInitial[0].name = initial[0].name;
+  haInitial[0].location = initial[0].location;
 }
 let devices = copy(initial), haDevices = copy(haInitial), revision = 1;
 const subscribers = new Set(), previews = new Map();
 const failure = code => { throw {code,message:code}; };
 const emit = () => subscribers.forEach(fn => fn({event_type:'setup_code_manager_updated'}));
 const ensureRevision = expected => { if (expected !== revision) failure('conflict'); };
+const identityFromHA = item => {
+  const active = (item.links || []).map(link => haDevices.find(device => device.id === link.ha_device_id)).filter(Boolean);
+  if (!active.length) return {};
+  const combined = key => [...new Set(active.map(device => device[key]).filter(Boolean))].sort((a,b) => a.toLowerCase() < b.toLowerCase() ? -1 : a.toLowerCase() > b.toLowerCase() ? 1 : 0).join(' / ').slice(0,256);
+  return {name:combined('name'),location:combined('location')};
+};
+const syncIdentities = () => { for (const item of devices) Object.assign(item,identityFromHA(item)); };
+const updateHADevice = (id,changes) => {
+  const device = haDevices.find(item => item.id === id);
+  if (!device) return false;
+  Object.assign(device,changes);syncIdentities();revision++;emit();return true;
+};
 const decorated = data => data.map(item => {
-  const links = item.links.map(link => {const ha = haDevices.find(d => d.id === link.ha_device_id);return {...link,active:!!ha,name:ha?.name || item.name,available:ha?.available};});
-  return {...copy(item),links,linked:links.some(link => link.active),available:links.some(link => link.active && link.available),protocols:[...new Set([...item.codes.map(c => c.protocol),...links.flatMap(link => haDevices.find(d => d.id === link.ha_device_id)?.protocols || [])])]};
+  const links = item.links.map(link => {const ha = haDevices.find(d => d.id === link.ha_device_id);return {...link,active:!!ha,name:ha?.name || item.name,location:ha ? ha.location : item.location,available:ha?.available};});
+  // Only this known synthetic payload has a precomputed manual equivalent.
+  const codes = item.codes.map(c => ({...storedCode(c),...(c.protocol === 'matter' && c.value === MATTER ? {manual_value:'34970112332'} : {})}));
+  return {...copy(item),...identityFromHA(item),codes,links,linked:links.some(link => link.active),available:links.some(link => link.active && link.available),protocols:[...new Set([...item.codes.map(c => c.protocol),...links.flatMap(link => haDevices.find(d => d.id === link.ha_device_id)?.protocols || [])])]};
 });
 const csvCell = value => `"${String(value ?? '').replaceAll('"','""')}"`;
 const exportCSV = () => {
@@ -89,6 +106,7 @@ async function callWS(message) {
   if(command === 'save') {
     ensureRevision(message.expected_revision);
     const draft=copy(message.record);const old=devices.find(item=>item.id === draft.id);
+    Object.assign(draft,identityFromHA(draft));
     if(!draft.name?.trim() || draft.codes.length > 3 || new Set(draft.codes.map(c=>c.protocol)).size !== draft.codes.length) failure('validation_error');
     for(const c of draft.codes) if(!['matter','homekit','zwave'].includes(c.protocol) || !c.value?.trim()) failure('invalid_code');
     for(const link of draft.links || []) {
@@ -97,6 +115,7 @@ async function callWS(message) {
     }
     draft.id ||= crypto.randomUUID();draft.created_at=old?.created_at || now();draft.updated_at=now();draft.source_refs=copy(old?.source_refs || []);draft.archived=old?.archived || false;
     draft.links=(draft.links || []).map(({ha_device_id})=>({ha_device_id}));
+    draft.codes=draft.codes.map(storedCode);
     const index=devices.findIndex(item=>item.id === draft.id);if(index<0) devices.push(draft);else devices[index]=draft;
     revision++;emit();return copy(draft);
   }
@@ -132,4 +151,4 @@ document.getElementById('theme').addEventListener('click',()=>{const dark=!docum
 document.getElementById('reset').addEventListener('click',()=>{location.reload();});
 document.getElementById('concurrent').addEventListener('click',()=>{devices[0].notes='Beispiel einer parallelen Änderung.';devices[0].updated_at=now();revision++;emit();});
 // Readable, explicitly demo-only controls for repeatable browser acceptance checks.
-window.setupCodeManagerDemo={callWS,snapshot:()=>({devices:copy(devices),revision}),removeHADevice:id=>{haDevices=haDevices.filter(item=>item.id !== id);revision++;emit();},concurrentChange:()=>{devices[0].notes='Parallel bearbeitet';revision++;emit();}};
+window.setupCodeManagerDemo={callWS,snapshot:()=>({devices:copy(devices),revision}),removeHADevice:id=>{syncIdentities();haDevices=haDevices.filter(item=>item.id !== id);syncIdentities();revision++;emit();},renameHADevice:(id,name)=>updateHADevice(id,{name}),setHAArea:(id,location)=>updateHADevice(id,{location}),concurrentChange:()=>{devices[0].notes='Parallel bearbeitet';revision++;emit();}};

@@ -20,7 +20,13 @@ from homeassistant.helpers.debounce import Debouncer
 from .const import EVENT_UPDATED, REFRESH_COOLDOWN
 from .inventory import RECORD_FIELDS, new_record, validate_record
 from .protocols import registry_devices, scan_all
-from .status import device_is_available, device_protocols, serialize_record
+from .status import (
+    device_identity,
+    device_is_available,
+    device_protocols,
+    linked_identity,
+    serialize_record,
+)
 from .store import SetupCodesStore
 from .transfer import MAX_CONTENT_BYTES, ImportIssue, export_data, parse_import, preview_import
 
@@ -143,11 +149,10 @@ class SetupCodesManager:
             devices.append(
                 {
                     "id": device.id,
-                    "name": device.name_by_user or device.name or "Gerät",
+                    **device_identity(self.hass, device),
                     "manufacturer": device.manufacturer or "",
                     "model": device.model or "",
                     "serial_number": device.serial_number or "",
-                    "location": self._area_name(device.area_id),
                     "protocols": device_protocols(device),
                     "integration_names": sorted(domains),
                     "record_ids": owners.get(device.id, []),
@@ -207,10 +212,17 @@ class SetupCodesManager:
                         continue
                     record.update(validated, updated_at=_now())
                     changed = True
+            # Include archived records and links to integrations outside discovery.
+            # Keep the last persisted HA identity if every linked device disappears.
+            for record in data["devices"]:
+                identity = linked_identity(self.hass, record["links"])
+                if identity and any(record[field] != value for field, value in identity.items()):
+                    record.update(identity, updated_at=_now())
+                    changed = True
             if changed:
                 await self._commit(data)
             else:
-                # A removal/rename changes live status even without a durable edit.
+                # Removal/reachability can change live status without a durable edit.
                 self._notify()
             return self.store.devices
 
@@ -241,6 +253,12 @@ class SetupCodesManager:
             if not isinstance(raw, dict) or set(raw) - allowed:
                 raise InventoryError("validation_error")
             clean = {k: deepcopy(v) for k, v in raw.items() if k in RECORD_FIELDS}
+            # Display-only Matter manual codes are always derived from value.
+            # Strip only this documented runtime field; all others stay strict.
+            if isinstance(clean.get("codes"), list):
+                for code in clean["codes"]:
+                    if isinstance(code, dict):
+                        code.pop("manual_value", None)
             asserted_active = (
                 {
                     link.get("ha_device_id")
@@ -252,11 +270,16 @@ class SetupCodesManager:
             )
             if isinstance(clean.get("links"), list):
                 clean["links"] = [
-                    {k: v for k, v in link.items() if k not in {"active", "name", "available"}}
+                    {
+                        k: v
+                        for k, v in link.items()
+                        if k not in {"active", "name", "location", "available"}
+                    }
                     if isinstance(link, dict)
                     else link
                     for link in clean["links"]
                 ]
+            clean.update(linked_identity(self.hass, clean.get("links")) or {})
             existing = next((r for r in data["devices"] if r["id"] == clean.get("id")), None)
             try:
                 record = new_record(**clean)
@@ -290,7 +313,11 @@ class SetupCodesManager:
             record = next((r for r in data["devices"] if r["id"] == record_id), None)
             if record is None:
                 raise InventoryError("not_found")
-            record.update(archived=archived, updated_at=_now())
+            record.update(
+                linked_identity(self.hass, record["links"]) or {},
+                archived=archived,
+                updated_at=_now(),
+            )
             await self._commit(data)
 
     async def async_delete(self, record_id: str, expected_revision: int) -> None:
@@ -362,6 +389,7 @@ class SetupCodesManager:
                 else:
                     kept.append(link)
             record["links"] = kept
+            record.update(linked_identity(self.hass, kept) or {})
         return reasons
 
     async def async_preview_import(self, format: str, content: str, owner: str) -> dict[str, Any]:
@@ -377,6 +405,8 @@ class SetupCodesManager:
             try:
                 incoming = parse_import(format, content, data["instance_id"])
                 reasons = self._prepare_links(incoming, data["devices"], legacy=format == "legacy")
+                for record in data["devices"]:
+                    record.update(linked_identity(self.hass, record["links"]) or {})
                 rows = preview_import(data["devices"], incoming)
             except ValueError as err:
                 raise InventoryError("invalid_import") from err
@@ -424,6 +454,7 @@ class SetupCodesManager:
                 record = validate_record(row["incoming"])
                 existing = next((r for r in data["devices"] if r["id"] == record["id"]), None)
                 self._validate_links(record, existing, data["devices"])
+                record.update(linked_identity(self.hass, record["links"]) or {})
                 data["devices"] = [r for r in data["devices"] if r["id"] != record["id"]] + [record]
                 linked = {link["ha_device_id"] for link in record["links"]}
                 data["ignored_ha_device_ids"] = [

@@ -1,6 +1,7 @@
 """Exercise persistence and registry behavior with actual Home Assistant helpers."""
 
 import json
+from copy import deepcopy
 from types import MappingProxyType
 from unittest.mock import patch
 
@@ -14,7 +15,7 @@ from homeassistant.helpers import entity_registry as er
 from custom_components.setup_code_manager.inventory import new_record
 from custom_components.setup_code_manager.manager import InventoryError, SetupCodesManager
 from custom_components.setup_code_manager.store import SetupCodesStore
-from custom_components.setup_code_manager.transfer import export_data
+from custom_components.setup_code_manager.transfer import export_data, parse_import
 
 
 @pytest.fixture
@@ -64,9 +65,13 @@ def revision(manager):
 
 async def test_removed_ha_device_preserves_codes_and_user_metadata(manager):
     device = add_device(manager)
+    area = ar.async_get(manager.hass).async_create("Wohnzimmer")
+    dr.async_get(manager.hass).async_update_device(
+        device.id, name_by_user="Mein Gerät", area_id=area.id
+    )
     await manager.async_sync()
     record = manager.store.devices[0]
-    record.update(name="Mein Gerät", location="Wohnzimmer", notes="Bleibt erhalten")
+    record.update(notes="Bleibt erhalten")
     record["codes"] = [{"id": "code", "protocol": "matter", "value": "34970112332", "label": ""}]
     await manager.async_save(record, revision(manager))
     dr.async_get(manager.hass).async_remove_device(device.id)
@@ -74,6 +79,7 @@ async def test_removed_ha_device_preserves_codes_and_user_metadata(manager):
     saved = manager.list_data()["devices"][0]
     assert not saved["linked"]
     assert saved["name"] == "Mein Gerät"
+    assert saved["location"] == "Wohnzimmer"
     assert saved["notes"] == "Bleibt erhalten"
     assert saved["codes"][0]["value"] == "34970112332"
     assert not saved["archived"]
@@ -275,3 +281,320 @@ async def test_long_ha_name_is_bounded_without_blocking_discovery(manager):
     dr.async_get(manager.hass).async_update_device(device.id, name_by_user="a" * 300)
     await manager.async_sync()
     assert manager.store.devices[0]["name"] == "a" * 256
+
+
+# Public CHIP test vectors; no real device credentials.
+MATTER_QR = "MT:Y.K9042C00KA0648G00"
+MATTER_QR_CHANGED_PIN = "MT:Y.K9042C000O0648G00"
+
+
+def matter_record():
+    return new_record(
+        "Synthetic Matter device",
+        codes=[{"id": "matter-code", "protocol": "matter", "value": MATTER_QR, "label": ""}],
+    )
+
+
+@pytest.mark.parametrize(
+    ("qr", "manual"),
+    [
+        ("MT:00000CQM00KA0648G00", "34970112332"),
+        ("MT:A3L90ARR15G6N57Y900", "745492075300001000013"),
+        ("MT:MZWA6G6026O2XP0II00", "619156140465523329207"),
+    ],
+)
+async def test_matter_qr_manual_value_is_only_runtime_data(manager, qr, manual):
+    raw = matter_record()
+    raw["codes"][0]["value"] = qr
+    original = deepcopy(raw)
+    saved = await manager.async_save(raw, revision(manager))
+    assert saved["codes"][0]["manual_value"] == manual
+    assert saved["codes"][0]["value"] == qr
+    assert manager.list_data()["devices"][0]["codes"][0] == saved["codes"][0]
+    assert raw == original
+    assert manager.store.devices[0]["codes"] == original["codes"]
+    persisted = json.loads(manager.store.path.read_text())
+    assert persisted["data"]["devices"][0]["codes"] == original["codes"]
+    # Serialization must never decorate the durable record in place.
+    before = manager.store.data
+    manager.list_data()
+    manager.list_data()
+    assert manager.store.data == before
+
+
+async def test_matter_manual_value_survives_archive_and_ha_device_removal(manager):
+    device = add_device(manager)
+    await manager.async_sync()
+    record = manager.store.devices[0]
+    record["codes"] = matter_record()["codes"]
+    saved = await manager.async_save(record, revision(manager))
+    assert saved["codes"][0]["manual_value"] == "34970112332"
+    await manager.async_archive(saved["id"], True, revision(manager))
+    archived = manager.list_data()["devices"][0]
+    assert archived["archived"] and archived["linked"]
+    assert archived["codes"][0]["manual_value"] == "34970112332"
+    dr.async_get(manager.hass).async_remove_device(device.id)
+    await manager.async_sync()
+    disconnected = manager.list_data()["devices"][0]
+    assert disconnected["archived"] and not disconnected["linked"]
+    assert disconnected["links"][0]["active"] is False
+    assert disconnected["codes"][0]["manual_value"] == "34970112332"
+    assert manager.store.devices[0]["codes"] == record["codes"]
+
+
+async def test_editing_matter_qr_recomputes_stale_or_forged_manual_value(manager):
+    draft = await manager.async_save(matter_record(), revision(manager))
+    draft["codes"][0]["value"] = MATTER_QR_CHANGED_PIN
+    # An old client or forged payload may submit anything here: it is display-only.
+    draft["codes"][0]["manual_value"] = {"untrusted": "not a pairing code"}
+    original = deepcopy(draft)
+    changed = await manager.async_save(draft, revision(manager))
+    assert changed["codes"][0]["manual_value"] == "34970212338"
+    assert changed["codes"][0]["value"] == MATTER_QR_CHANGED_PIN
+    assert draft == original
+    assert "manual_value" not in manager.store.devices[0]["codes"][0]
+    changed["name"] = "Edited without touching code"
+    resaved = await manager.async_save(changed, revision(manager))
+    assert resaved["codes"][0] == changed["codes"][0]
+
+
+@pytest.mark.parametrize(
+    ("protocol", "value"),
+    [
+        ("matter", "34970112332"),
+        ("homekit", "03145154"),
+        ("zwave", "00001-00002-00003-00004-00005-00006-00007-65535"),
+    ],
+)
+async def test_non_qr_codes_never_receive_a_derived_matter_manual_value(manager, protocol, value):
+    raw = new_record(
+        "Synthetic code", codes=[{"id": "code", "protocol": protocol, "value": value, "label": ""}]
+    )
+    raw["codes"][0]["manual_value"] = "ignored runtime value"
+    saved = await manager.async_save(raw, revision(manager))
+    assert "manual_value" not in saved["codes"][0]
+    assert "manual_value" not in manager.list_data()["devices"][0]["codes"][0]
+    assert "manual_value" not in manager.store.devices[0]["codes"][0]
+
+
+@pytest.mark.parametrize("format", ["json", "csv"])
+async def test_exports_exclude_derived_matter_manual_value(manager, format):
+    saved = await manager.async_save(matter_record(), revision(manager))
+    assert saved["codes"][0]["manual_value"] == "34970112332"
+    content = manager.export(format)["content"]
+    assert "manual_value" not in content
+    assert "34970112332" not in content
+    assert parse_import(format, content, manager.store.data["instance_id"]) == manager.store.devices
+
+
+async def test_ignoring_manual_value_does_not_relax_code_field_validation(manager):
+    saved = await manager.async_save(matter_record(), revision(manager))
+    saved["codes"][0]["unknown_code_field"] = True
+    before = manager.store.data
+    with pytest.raises(InventoryError, match="invalid_code"):
+        await manager.async_save(saved, revision(manager))
+    assert manager.store.data == before
+
+
+async def test_forged_manual_value_cannot_make_an_invalid_qr_valid(manager):
+    raw = matter_record()
+    raw["codes"][0].update(value="MT:INVALID", manual_value="34970112332")
+    before = manager.store.data
+    with pytest.raises(InventoryError, match="invalid_code"):
+        await manager.async_save(raw, revision(manager))
+    assert manager.store.data == before
+
+
+async def test_linked_identity_is_live_and_save_cannot_override_ha(manager):
+    device = add_device(manager)
+    await manager.async_sync()
+    before = manager.store.data
+    area = ar.async_get(manager.hass).async_create("HA room")
+    dr.async_get(manager.hass).async_update_device(
+        device.id, name="Manufacturer name", name_by_user="HA chosen name", area_id=area.id
+    )
+    live = manager.list_data()["devices"][0]
+    assert (live["name"], live["location"]) == ("HA chosen name", "HA room")
+    assert live["links"][0]["location"] == "HA room"
+    assert live["links"][0]["name"] == "HA chosen name"
+    assert manager.store.data == before
+    live.update(name="Forbidden manual name", location="Forbidden room", notes="Editable note")
+    live["links"][0].update(name="Forged HA name", location="Forged HA room")
+    original = deepcopy(live)
+    saved = await manager.async_save(live, revision(manager))
+    assert (saved["name"], saved["location"]) == ("HA chosen name", "HA room")
+    assert saved["notes"] == "Editable note"
+    assert live == original
+    assert manager.store.devices[0]["links"] == [{"ha_device_id": device.id}]
+    assert manager.store.devices[0]["name"] == "HA chosen name"
+    assert manager.store.devices[0]["location"] == "HA room"
+
+
+@pytest.mark.parametrize("protocol", ["matter", "fixture_other_integration"])
+async def test_sync_persists_last_ha_identity_including_archived_and_other_integrations(
+    manager, protocol
+):
+    device = add_device(manager, protocols=(protocol,))
+    area = ar.async_get(manager.hass).async_create("Old room")
+    dr.async_get(manager.hass).async_update_device(device.id, area_id=area.id)
+    saved = await manager.async_save(
+        new_record("Initial", links=[{"ha_device_id": device.id}], notes="Keep my note"),
+        revision(manager),
+    )
+    await manager.async_archive(saved["id"], True, revision(manager))
+    dr.async_get(manager.hass).async_update_device(device.id, name_by_user="Latest HA name")
+    ar.async_get(manager.hass).async_update(area.id, name="Renamed room")
+    await manager.async_sync()
+    stored = manager.store.get(saved["id"])
+    assert (stored["name"], stored["location"]) == ("Latest HA name", "Renamed room")
+    assert stored["archived"] and stored["notes"] == "Keep my note"
+    stable_revision = revision(manager)
+    await manager.async_sync()
+    assert revision(manager) == stable_revision
+    dr.async_get(manager.hass).async_remove_device(device.id)
+    await manager.async_sync()
+    disconnected = next(r for r in manager.list_data()["devices"] if r["id"] == saved["id"])
+    assert not disconnected["linked"]
+    assert (disconnected["name"], disconnected["location"]) == ("Latest HA name", "Renamed room")
+    disconnected.update(name="Editable historical name", location="Storage cupboard")
+    await manager.async_save(disconnected, revision(manager))
+    assert manager.store.get(saved["id"])["name"] == "Editable historical name"
+    assert manager.store.get(saved["id"])["location"] == "Storage cupboard"
+
+
+async def test_removed_area_clears_linked_location_and_name_uses_ha_fallback(manager):
+    device = add_device(manager)
+    area = ar.async_get(manager.hass).async_create("Former room")
+    dr.async_get(manager.hass).async_update_device(device.id, area_id=area.id)
+    await manager.async_sync()
+    dr.async_get(manager.hass).async_update_device(
+        device.id, area_id=None, name_by_user=None, name=None
+    )
+    live = manager.list_data()["devices"][0]
+    assert live["name"] == "Gerät"
+    assert live["location"] == ""
+    assert live["links"][0]["location"] == ""
+    await manager.async_sync()
+    assert manager.store.devices[0]["name"] == "Gerät"
+    assert manager.store.devices[0]["location"] == ""
+
+
+async def test_multiple_links_aggregate_unique_identity_independent_of_link_order(manager):
+    first = add_device(manager, "one", protocols=("fixture_other_integration",))
+    second = add_device(manager, "two", protocols=("fixture_other_integration",))
+    room_z = ar.async_get(manager.hass).async_create("Office")
+    room_a = ar.async_get(manager.hass).async_create("Kitchen")
+    registry = dr.async_get(manager.hass)
+    registry.async_update_device(first.id, name_by_user="Zeta", area_id=room_z.id)
+    registry.async_update_device(second.id, name_by_user="Alpha", area_id=room_a.id)
+    saved = await manager.async_save(
+        new_record("Manual", links=[{"ha_device_id": first.id}, {"ha_device_id": second.id}]),
+        revision(manager),
+    )
+    assert (saved["name"], saved["location"]) == ("Alpha / Zeta", "Kitchen / Office")
+    saved["links"].reverse()
+    saved = await manager.async_save(saved, revision(manager))
+    assert (saved["name"], saved["location"]) == ("Alpha / Zeta", "Kitchen / Office")
+    registry.async_update_device(second.id, name_by_user="Zeta", area_id=room_z.id)
+    live = manager.list_data()["devices"][0]
+    assert (live["name"], live["location"]) == ("Zeta", "Office")
+    registry.async_update_device(second.id, entry_type=dr.DeviceEntryType.SERVICE)
+    registry.async_update_device(first.id, name_by_user="Only real device", area_id=None)
+    live = manager.list_data()["devices"][0]
+    assert (live["name"], live["location"]) == ("Only real device", "")
+
+
+async def test_unlinked_manual_identity_survives_sync_archive_and_unlink(manager):
+    manual = await manager.async_save(
+        new_record("Manual name", location="Manual room", notes="My note"), revision(manager)
+    )
+    await manager.async_archive(manual["id"], True, revision(manager))
+    await manager.async_sync()
+    assert manager.store.get(manual["id"])["name"] == "Manual name"
+    assert manager.store.get(manual["id"])["location"] == "Manual room"
+    device = add_device(manager, protocols=("fixture_other_integration",))
+    linked = await manager.async_save(
+        new_record("Initial", links=[{"ha_device_id": device.id}]), revision(manager)
+    )
+    linked.update(links=[], name="Unlinked custom name", location="Custom room", notes="Keep note")
+    await manager.async_save(linked, revision(manager))
+    await manager.async_sync()
+    assert manager.store.get(linked["id"])["name"] == "Unlinked custom name"
+    assert manager.store.get(linked["id"])["location"] == "Custom room"
+    assert manager.store.get(linked["id"])["notes"] == "Keep note"
+
+
+@pytest.mark.parametrize("format", ["json", "csv", "legacy"])
+async def test_import_linked_identity_matches_ha_and_reimport_is_unchanged(manager, format):
+    device = add_device(manager, protocols=("fixture_other_integration",))
+    area = ar.async_get(manager.hass).async_create("HA room")
+    dr.async_get(manager.hass).async_update_device(
+        device.id, name_by_user="HA name", area_id=area.id
+    )
+    if format == "legacy":
+        content = json.dumps(
+            {
+                "devices": [
+                    {
+                        "id": "legacy-identity",
+                        "name": "File name",
+                        "location": "File room",
+                        "notes": "Imported note",
+                        "ha_device_id": device.id,
+                        "protocol": "matter",
+                        "setup_code": "34970112332",
+                    }
+                ]
+            }
+        )
+        manager.legacy_path.write_text(content)
+    else:
+        data = manager.store.data
+        data["devices"] = [
+            new_record(
+                "File name",
+                location="File room",
+                notes="Imported note",
+                links=[{"ha_device_id": device.id}],
+            )
+        ]
+        content = export_data(format, data)
+    preview = await manager.async_preview_import(format, content, "admin")
+    row = preview["rows"][0]
+    assert (row["incoming"]["name"], row["incoming"]["location"]) == ("HA name", "HA room")
+    await manager.async_import(preview["token"], preview["revision"], {row["key"]: "add"}, "admin")
+    stored = manager.store.devices[0]
+    assert (stored["name"], stored["location"]) == ("HA name", "HA room")
+    assert stored["notes"] == "Imported note"
+    again = await manager.async_preview_import(format, content, "admin")
+    assert again["counts"] == {"unchanged": 1}
+
+
+async def test_import_rechecks_live_identity_at_commit(manager):
+    device = add_device(manager, protocols=("fixture_other_integration",))
+    data = manager.store.data
+    data["devices"] = [new_record("File", links=[{"ha_device_id": device.id}])]
+    preview = await manager.async_preview_import("json", export_data("json", data), "admin")
+    dr.async_get(manager.hass).async_update_device(device.id, name_by_user="Renamed after preview")
+    row = preview["rows"][0]
+    await manager.async_import(preview["token"], preview["revision"], {row["key"]: "add"}, "admin")
+    assert manager.store.devices[0]["name"] == "Renamed after preview"
+
+
+async def test_ha_identity_is_bounded_and_unknown_link_fields_remain_rejected(manager):
+    device = add_device(manager, protocols=("fixture_other_integration",))
+    area = ar.async_get(manager.hass).async_create("R" * 300)
+    dr.async_get(manager.hass).async_update_device(
+        device.id, name_by_user="N" * 300, area_id=area.id
+    )
+    saved = await manager.async_save(
+        new_record("Initial", links=[{"ha_device_id": device.id}]), revision(manager)
+    )
+    assert saved["name"] == "N" * 256
+    assert saved["location"] == "R" * 256
+    assert saved["links"][0]["location"] == "R" * 256
+    saved["links"][0]["unknown_link_field"] = "not silently stripped"
+    before = manager.store.data
+    with pytest.raises(InventoryError, match="validation_error"):
+        await manager.async_save(saved, revision(manager))
+    assert manager.store.data == before

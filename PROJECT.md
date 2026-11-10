@@ -18,10 +18,13 @@ angelegt.
 
 ## Projektstand
 
-Diese Testversion **0.1.0b3** ist lokal geprüft; die praktische iPhone-Abnahme
-des korrigierten Layouts steht noch aus. Die [Versionshinweise](docs/releases/0.1.0b3.md)
-beschreiben Umfang und Grenzen. Die veröffentlichte und auf dem Zielsystem
-installierte Testversion ist [0.1.0b2](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b2).
+Der lokale Entwicklungsstand **0.1.0b4** ergänzt manuelle Matter-Einrichtungscodes,
+einen grünen Speicherstatus und automatisch übernommene HA-Namen und Räume.
+Installation und praktische Abnahme auf dem Zielsystem stehen noch aus.
+Die [Versionshinweise](docs/releases/0.1.0b4.md)
+beschreiben Umfang und Grenzen. Zuletzt wurde die veröffentlichte
+[0.1.0b3](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b3)
+auf dem Zielsystem installiert.
 Dies ist noch keine stabile Version. Der Standardbranch `main` bleibt beim
 bereits veröffentlichten und auf HA OS geprüften Stand **0.1.0b1**.
 Die neue Integration liegt unter `custom_components/setup_code_manager` und hat
@@ -53,8 +56,8 @@ Eingabefeld übernommen; der Entwurf wurde ohne Speichern verworfen. Der lokale
 Abschlusslauf umfasst **270 Python- und 33 Node-Tests**, jeweils bestanden.
 Anschließend wurde **0.1.0b2** auf dem Zielsystem installiert. Die Fotoaufnahme in
 der iPhone-Companion-App wurde vom Nutzer bestätigt; dessen Screenshot zeigt einen
-gespeicherten realen Gerätecode. Die Persistenz nach einem HA-Neustart sowie Export,
-Import und vollständiger Restore im Zielsystem sind weiterhin offen.
+gespeicherten realen Gerätecode. Export, Import und vollständiger Restore im
+Zielsystem sind weiterhin offen.
 
 **0.1.0b3** korrigiert die mobile Detailansicht: Der Kopf mit Schließen-Schaltfläche
 bleibt unterhalb des sicheren Bildschirmbereichs sichtbar, der Inhalt scrollt
@@ -64,15 +67,34 @@ Scrollposition; Schließen per Schaltfläche oder Escape setzt den Fokus zurück
 in die Geräteliste und maskiert aufgedeckte Codes. Lokal sind **270 Python- und
 48 Node-Tests** bestanden. Browserprüfungen im Hoch- und Querformat,
 mit HA-Seitenleiste und auf dem Desktop bestätigten die Detaildarstellung.
-Scrollen bis zum Ende und erreichbares Schließen wurden geprüft; die Abnahme auf dem Ziel-iPhone
-steht aus. Diese Beta wird vom Featurebranch veröffentlicht; `main` bleibt bei `0.1.0b1`.
+Nach Veröffentlichung und Installation von **0.1.0b3** wurde Home Assistant neu
+gestartet. Danach blieben fünf Geräte sichtbar, davon zwei mit gespeicherten Codes.
+Ein WebKit-Browsertest der tatsächlichen HA-Oberfläche bei 390 × 844 Pixeln
+bestätigte Scrollen bis zum Ende und erreichbares Schließen. Die ausdrückliche
+Bestätigung des Layouts auf dem physischen iPhone steht noch aus.
+
+**0.1.0b4** leitet aus gültigen gespeicherten Matter-QRs automatisch den manuellen
+11- oder 21-stelligen Einrichtungscode ab. Original und Ziffernfolge sind getrennt
+maskiert, anzeigbar und kopierbar. Bestehende Einträge benötigen keinen neuen Scan.
+Die Ableitung erfolgt nur zur Laufzeit; Speicherformat, CSV/JSON und HA-Backups
+behalten den Original-QR und erzeugen keinen zweiten Matter-Codeeintrag. Nach
+Import oder Wiederherstellung wird der manuelle Code erneut berechnet.
+Die grüne Anzeige **Gespeichert** beschreibt vorhandene Codes unabhängig vom
+Online-/Offline-Status. Bei vorhandener HA-Verknüpfung sind Name und Raum von HA
+vorgegeben und hier schreibgeschützt; Umbenennungen und Raumänderungen werden
+automatisch übernommen. Mehrere Verknüpfungen ergeben eindeutige, sortierte Namen
+und Räume. Ohne vorhandene HA-Verknüpfung bleiben manuelle Angaben möglich;
+Notizen sind immer bearbeitbar. Nach Entfernen des letzten HA-Geräts bleiben die
+zuletzt bekannten Angaben und Codes erhalten. Eine Formatmigration ist nicht nötig.
+Automatisierte Tests und Browserabnahme siehe [Teststand](docs/TESTING.de.md).
+Weitere Betas stammen vom Featurebranch; `main` bleibt bei `0.1.0b1`.
 
 Die vorhandene Livekamera benötigt HTTPS. Fotoaufnahme über HTTP bleibt verfügbar;
 ein unterstützter öffentlicher Ladeweg zum nativen Companion-Scanner besteht für
 Custom Panels derzeit nicht. Es wurden keine Netzwerkeinstellungen geändert.
 
 Für Tests über ein benutzerdefiniertes Repository im integrierten Marketplace von
-HA 2026.11 ist die GitHub-Vorabversion `0.1.0b2` ausdrücklich in der Versionsauswahl
+HA 2026.11 ist für die neue Funktion die GitHub-Vorabversion `0.1.0b4` ausdrücklich in der Versionsauswahl
 zu wählen. Vorabversionen müssen **vor dem Installieren** eingeschlossen werden;
 Name, Versionsnummer und die neue Domain `setup_code_manager` sind zu prüfen.
 Der Standardbranch `main` enthält jetzt ebenfalls `setup_code_manager`.

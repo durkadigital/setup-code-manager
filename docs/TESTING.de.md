@@ -1,13 +1,60 @@
 # Teststand und praktische Abnahme
 
-Dieser Teststand beschreibt den lokalen Entwicklungsstand **0.1.0b3**, die
-installierte [0.1.0b2](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b2)
-und die getrennt dokumentierten früheren Prüfungen von **0.1.0b1**. Veröffentlichung
-und Installation von `0.1.0b3` stehen noch aus; der Standardbranch `main` bleibt
-bei `0.1.0b1`. Automatisierte Prüfungen verwenden synthetische Daten. Zusätzlich
+Dieser Teststand beschreibt den lokalen Entwicklungsstand **0.1.0b4**, die zuletzt
+installierte [0.1.0b3](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b3)
+und die getrennt dokumentierten früheren Betas. Installation
+und praktische Abnahme von `0.1.0b4` stehen noch aus; der Standardbranch `main`
+bleibt bei `0.1.0b1`. Automatisierte Prüfungen verwenden synthetische Daten. Zusätzlich
 wurden ein reales QR-Foto lokal und die Fotoaufnahme auf dem Ziel-iPhone geprüft.
 Private Fotos und Codeinhalte werden nicht im Repository dokumentiert.
 Die vollständige praktische Abnahme steht aus.
+
+## Lokaler Entwicklungsstand 0.1.0b4
+
+Die Beta ergänzt drei zusammengehörige Funktionen:
+
+- Zu gültigen gespeicherten `MT:`-QRs automatisch den manuellen Matter-Code mit
+  11 oder 21 Ziffern ableiten. Original und Zifferncode bleiben unabhängig maskiert,
+  anzeigbar und kopierbar; auch ältere Einträge benötigen keinen erneuten Scan.
+- Vorhandene Codes grün als **Gespeichert** kennzeichnen. Der separate
+  Online-/Offline-Status beschreibt weiterhin die Erreichbarkeit des HA-Geräts.
+- Namen und Räume vorhandener verknüpfter HA-Geräte automatisch übernehmen,
+  einschließlich späterer Umbenennungen und Raumänderungen. Diese Felder sind im
+  Panel schreibgeschützt. Mehrere Verknüpfungen ergeben eindeutige, sortierte Namen
+  und Räume. Ohne vorhandene HA-Verknüpfung sind manuelle Angaben möglich;
+  Notizen bleiben immer bearbeitbar.
+
+Die Matter-Ableitung erfolgt nur zur Laufzeit. Es entsteht kein zweiter
+gespeicherter Code; JSON, CSV und HA-Backups behalten den Original-QR. Nach Import
+oder Wiederherstellung wird der manuelle Code erneut berechnet. Beim Entfernen
+des letzten verknüpften HA-Geräts bleiben die zuletzt bekannten Namen und Räume
+sowie die Codes erhalten. Eine Migration des Speicherformats ist nicht erforderlich.
+
+Die Referenz für die Umrechnung sind die
+[offiziellen Matter-Testvektoren](https://github.com/project-chip/connectedhomeip/blob/master/src/setup_payload/tests/run_python_setup_payload_test.py)
+und der [offizielle Generator](https://github.com/project-chip/connectedhomeip/blob/master/src/setup_payload/ManualSetupPayloadGenerator.cpp).
+Standard-Flow ergibt 11 Ziffern, User-Intent- und Custom-Flow jeweils 21, einschließlich
+Verhoeff-Prüfziffer. Führende Nullen bleiben erhalten.
+
+**Abschlussprüfung am 10. November 2026:** 297 Python- und 82 JavaScript-Tests
+bestanden. Ruff, Format-, Syntax- und Whitespace-Prüfungen bestanden. Die Tests
+prüfen zusätzlich die offiziellen Matter-Referenzvektoren, reine Laufzeitdaten,
+HA-Identität bei Speichern/Import/Umbenennen/Entfernen sowie schreibgeschützte
+HA-Angaben und getrennte Code-/Erreichbarkeitsanzeigen.
+
+Die lokale Browserprüfung bei 390 × 844 Pixeln bestätigt den zusätzlichen
+maskierten Matter-Code, die formatierte Ziffernanzeige und das Kopieren ohne
+Trennzeichen durch anschließendes Einfügen in einen verworfenen Testentwurf.
+Verknüpfte Namen/Räume sind Textanzeigen; die eigene Notiz bleibt editierbar.
+Grüne Speicherkennzeichnungen sind auch bei einem nicht erreichbaren Testgerät
+sichtbar. Alle Browserdaten sind synthetisch. Die Zahlen in den folgenden
+Abschnitten beziehen sich ausdrücklich auf frühere Betas.
+
+Für die praktische Abnahme im Zielsystem sind zusätzlich zu den bisherigen Fällen
+zu prüfen: bestehender Matter-QR ohne neuen Scan, getrenntes Anzeigen und Kopieren,
+grüner Speicherstatus bei einem Offline-Gerät, HA-Umbenennung und Raumwechsel,
+mehrere Verknüpfungen sowie Datenerhalt nach Entfernen der letzten Verknüpfung.
+[Versionshinweise](releases/0.1.0b4.md).
 
 ## Lokale Prüfung von 0.1.0b3 am 7. November 2026
 
@@ -37,7 +84,9 @@ Fokus. Ein anderes oder erneut geöffnetes Gerät beginnt oben.
   Notizen und drei Codes bleibt mit begrenztem Titel und scrollbarem Inhalt bedienbar.
 
 Diese Messung mit simulierten Insets ersetzt keine Abnahme in der iPhone-
-Companion-App. Installation und praktische Abnahme dieser Beta stehen noch aus.
+Companion-App. Installation und der spätere WebKit-Test am laufenden HA-System
+sind unten gesondert dokumentiert; die ausdrückliche Bestätigung auf dem
+physischen iPhone steht noch aus.
 [Versionshinweise](releases/0.1.0b3.md).
 
 ## Lokale Prüfung von 0.1.0b2 am 7. November 2026
@@ -94,7 +143,7 @@ und [Hassfest](https://github.com/durkadigital/setup-code-manager/actions/runs/4
 für den veröffentlichten Entwicklungsstand `d9a70e6` bestanden. Die HACS-Validierung
 prüft Repository-Voraussetzungen; sie bedeutet keine Aufnahme in den HACS-Katalog.
 Diese CI-Nachweise beziehen sich auf den genannten Entwicklungscommit und sind
-von den oben dokumentierten lokalen Läufen für `0.1.0b2` und `0.1.0b3` zu unterscheiden.
+von den oben dokumentierten lokalen Läufen für die nachfolgenden Betas zu unterscheiden.
 
 ## Isolierter Lauf mit echtem Home Assistant
 
@@ -152,10 +201,21 @@ bestätigte die Fotoaufnahme in der iPhone-Companion-App über den HTTP-Zugang.
 Der anschließend übermittelte Screenshot zeigt den erkannten und gespeicherten
 realen Gerätecode. Private Bilder und Codewerte werden nicht übernommen.
 
-Die Persistenz dieses Codes nach einem HA-Neustart wurde damit noch nicht geprüft.
-Ebenso fehlen weitere Geräte, Abbruchfälle und der Livevideo-Test über HTTPS.
-Die gemeldeten Probleme mit Schließen und Scrollen der mobilen Detailansicht
-werden mit `0.1.0b3` korrigiert; deren praktische iPhone-Abnahme steht noch aus.
+Dieser Fototest allein prüfte noch keine Neustartpersistenz. Der spätere Neustart
+mit `0.1.0b3` ist im folgenden Abschnitt dokumentiert. Weitere Geräte, Abbruchfälle
+und der Livevideo-Test über HTTPS bleiben offen.
+
+## Installation und WebKit-Prüfung von 0.1.0b3 auf Home Assistant OS
+
+Am 7. November 2026 wurde die veröffentlichte **0.1.0b3** über den Marketplace auf
+dem Zielsystem installiert und Home Assistant neu gestartet. Danach zeigte das
+Panel weiterhin **fünf Geräte, davon zwei mit gespeicherten Codes**.
+
+Die tatsächliche HA-Oberfläche wurde anschließend in Safari/WebKit mit einer
+Darstellungsgröße von **390 × 844 Pixeln** geprüft: Detailinhalt bis zum Ende
+scrollbar, Schließen-Schaltfläche erreichbar und Rückkehr zur Liste erfolgreich.
+Dies ist ein Browsertest am laufenden HA-System; die ausdrückliche Bestätigung
+des korrigierten Layouts auf dem physischen iPhone steht noch aus.
 
 ## Direktscan und HTTP
 
@@ -205,9 +265,9 @@ nicht geändert.
    durchführen. Die Ergebnisse der Vorabversion entscheiden über weitere Betas
    und eine spätere stabile Veröffentlichung.
 
-Offen sind außerdem die Persistenz gespeicherter Codes nach einem HA-Neustart,
-Export/Import im Zielsystem, ein vollständiger HA-Restore und die weiteren
-Smartphone-/Companion-App-Abnahmen einschließlich des Layouts von `0.1.0b3`. Ein automatisierter
+Offen sind Export/Import im Zielsystem, ein vollständiger HA-Restore und die weiteren
+Smartphone-/Companion-App-Abnahmen einschließlich des Layouts auf dem physischen
+iPhone und der neuen Funktionen aus `0.1.0b4`. Ein automatisierter
 Decoder-Test belegt die Erkennung der Testbilder, nicht die Qualität aller realen
 Kameras, Ausdrucke und Lichtverhältnisse.
 

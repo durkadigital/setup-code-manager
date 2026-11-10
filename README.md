@@ -2,28 +2,37 @@
 
 Geräte und Einrichtungscodes in Home Assistant verwalten, lokal scannen und sichern.
 
-**Testversion [0.1.0b3](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b3): erreichbare Gerätedetails auf kleinen Bildschirmen.
-Lokal geprüft; die praktische iPhone-Abnahme dieser Beta steht noch aus.
+**Entwicklungsstand [0.1.0b4](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b4): Matter-Zifferncodes, grüner Speicherstatus und Gerätenamen aus Home Assistant.
+Lokal geprüft; Installation und praktische Abnahme auf dem Zielsystem stehen noch aus.
 Noch keine stabile Version oder allgemeine Katalogaufnahme.**
-Die Detailansicht erhält einen festen Kopf mit sicherem Abstand zur Statusleiste
-und einen eigenen scrollbaren Inhalt. Lange Titel bleiben auf zwei Zeilen begrenzt;
-weitere Geräteangaben stehen im Scrollbereich. Beim Anzeigen eines Codes und bei
-Aktualisierungen bleibt die Scrollposition erhalten; Schließen führt den
-Tastaturfokus zum Gerät in der Liste zurück.
-[Änderungen und Grenzen von Beta 3](docs/releases/0.1.0b3.md).
+Zu gültigen Matter-QR-Codes mit `MT:` erscheint automatisch der passende
+11- oder 21-stellige Einrichtungscode, auch bei bereits gespeicherten Einträgen.
+QR-Inhalt und Zifferncode lassen sich getrennt anzeigen und kopieren; beide
+bleiben zunächst maskiert. Der Original-QR bleibt unverändert gespeichert.
+Ein grünes **Gespeichert** kennzeichnet vorhandene Codes. Verknüpfte Geräte
+übernehmen Namen und Räume automatisch aus Home Assistant.
+[Änderungen und Grenzen von Beta 4](docs/releases/0.1.0b4.md).
 
-Die veröffentlichte [0.1.0b2](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b2)
-ist auf dem Zielsystem installiert. Am 7. November 2026 wurde die Fotoaufnahme in
-der iPhone-Companion-App bestätigt; ein realer Gerätecode wurde anschließend
-gespeichert. Die Persistenz dieses Codes nach einem HA-Neustart sowie Export und
-Wiederherstellung im Zielsystem bleiben offen ([Teststand](docs/TESTING.de.md)).
-Installation, Einrichtung und Neustart waren zuvor mit **0.1.0b1** geprüft worden.
+Auf dem Zielsystem wurde zuletzt **0.1.0b3** installiert und Home Assistant neu
+gestartet. Danach waren fünf Geräte sichtbar, davon zwei mit gespeicherten Codes.
+Scrollen und Schließen wurden dort im WebKit-Browser bei 390 × 844 Pixeln geprüft;
+die Bestätigung des Detail-Layouts auf dem physischen iPhone steht noch aus.
+Die Fotoaufnahme in der iPhone-Companion-App war bereits mit **0.1.0b2** bestätigt.
+Export und vollständige Wiederherstellung im Zielsystem bleiben offen
+([Teststand](docs/TESTING.de.md)).
 Die Oberfläche ist auf Deutsch und Englisch verfügbar.
 
 ## Funktionen
 
 - Eigenständiges Geräteinventar mit Matter-, HomeKit- und Z-Wave-Codes.
 - QR-Code per Kamera oder Foto erfassen; der Decoder wird lokal mitgeliefert.
+- Zu gespeicherten Matter-QRs den manuellen Einrichtungscode automatisch ableiten,
+  separat anzeigen und kopieren, ohne erneut zu scannen.
+- Vorhandene Codes mit grünem **Gespeichert** kennzeichnen. Die Anzeige beschreibt
+  den Codebestand; die Erreichbarkeit des Geräts wird gesondert angezeigt.
+- Namen und Räume verknüpfter Geräte aus Home Assistant übernehmen und bei
+  Änderungen automatisch aktualisieren. Ohne HA-Verknüpfung bleiben eigene
+  Namen und Standorte möglich; Notizen lassen sich jederzeit bearbeiten.
 - Beim Erfassen ein HA-Gerät auswählen. Standardmäßig erscheinen Geräte, denen
   der gewählte Protokollcode fehlt: Ein vorhandener HomeKit-Code schließt ein
   Gerät ohne Matter-Code nicht aus. Offline-Geräte bleiben auswählbar.
@@ -43,6 +52,12 @@ Die App koppelt keine Geräte. „Ohne Code“ bezieht sich auf den Bestand dies
 Matter- und HomeKit-Codes werden nicht aus Home Assistant ausgelesen. Unterstützte
 Z-Wave-Geräte können ihre DSK über die vorhandene Integration bereitstellen.
 
+Solange mindestens ein zugehöriges HA-Gerät vorhanden ist, werden Name und Raum
+in Home Assistant gepflegt und hier schreibgeschützt angezeigt. Bei mehreren
+Verknüpfungen werden unterschiedliche Namen und Räume sortiert zusammengefasst.
+Wird das letzte verknüpfte HA-Gerät entfernt, bleiben die zuletzt bekannten Angaben
+und alle Codes erhalten; der Eintrag lässt sich anschließend wieder manuell benennen.
+
 ## Testinstallation
 
 Vorgesehen für Home Assistant ab 2026.1; die aktuelle automatisierte Testumgebung
@@ -52,7 +67,7 @@ HA-Sicherung anlegen und die ursprüngliche Integration samt Daten erhalten.
 
 ### Über den Marketplace ab Home Assistant 2026.11
 
-Für die Layoutkorrektur ausdrücklich **`0.1.0b3`** auswählen. Falls diese Version noch nicht
+Für die Neuerungen ausdrücklich **`0.1.0b4`** auswählen. Falls diese Version noch nicht
 angeboten wird, die Repository-Daten aktualisieren und die Versionsauswahl erneut
 öffnen oder die manuelle Installation unten verwenden.
 
@@ -61,7 +76,7 @@ angeboten wird, die Repository-Daten aktualisieren und die Versionsauswahl erneu
    Repository vom Typ **Integration** hinzufügen. Falls angefordert, GitHub verbinden.
 2. Die Repository-Details öffnen und **vor der Installation** die Option
    **Vorabversionen einschließen** / **Include pre-releases** aktivieren.
-3. Die angebotene Version prüfen: **Setup Code Manager**, **`0.1.0b3`**, neue
+3. Die angebotene Version prüfen: **Setup Code Manager**, **`0.1.0b4`**, neue
    Integrationskennung **`setup_code_manager`**. Wenn noch **Setup Codes** oder eine
    frühere Version angeboten wird, nicht installieren; die
    Repository-Daten aktualisieren und die Versionsauswahl erneut prüfen.
@@ -80,17 +95,17 @@ Details beschreibt die [offizielle Release-Dokumentation](https://contributors.h
 
 ### Alternativ manuell
 
-Die Version **`0.1.0b3`** auf der
+Nach Veröffentlichung die Version **`0.1.0b4`** auf der
 [Release-Seite](https://github.com/durkadigital/setup-code-manager/releases) auswählen
 und deren **Source code (zip)** laden. Im heruntergeladenen `manifest.json` muss
-`0.1.0b3` stehen.
+`0.1.0b4` stehen.
 
 Den vollständigen Ordner `custom_components/setup_code_manager` nach
 `<HA-Konfiguration>/custom_components/setup_code_manager` kopieren, HA neu starten
 und anschließend **Setup Code Manager** über Geräte & Dienste hinzufügen.
 Der Standardbranch `main` bleibt beim geprüften Stand **`0.1.0b1`** mit der neuen
-Domain `setup_code_manager`. Für die veröffentlichten Scanverbesserungen die
-Release-Version **`0.1.0b3`** verwenden. Weitere Betas werden vom Featurebranch
+Domain `setup_code_manager`. Für die Neuerungen die
+Release-Version **`0.1.0b4`** verwenden. Weitere Betas werden vom Featurebranch
 veröffentlicht.
 
 Die neue Domain `setup_code_manager` ist von `setup_codes` getrennt. Beide können
@@ -124,6 +139,12 @@ TLV-Typen werden ausdrücklich abgelehnt.
 Pro Gerät wird derzeit **ein Code pro Protokoll** gespeichert. Ein Original-QR
 bleibt vollständig erhalten und kann erneut angezeigt werden. Unterschiedliche
 Original- und temporäre Freigabecodes brauchen eine bewusste Auswahl.
+
+Der zusätzliche manuelle Matter-Code wird bei jedem Laden aus dem gültigen `MT:`-
+Original abgeleitet. Er ist kein zweiter gespeicherter Code und kann nicht unabhängig
+bearbeitet werden. JSON, CSV und HA-Backups behalten den Original-QR; nach Import
+oder Wiederherstellung wird die Ziffernfolge ab `0.1.0b4` erneut daraus berechnet.
+Die Ableitung öffnet kein Pairingfenster und erneuert keinen abgelaufenen Freigabecode.
 
 JSON ist das vollständige Inventarformat. CSV hat ein festes versioniertes Schema
 mit einer Zeile pro Code, einschließlich codefreier Geräte. Ein reversibles

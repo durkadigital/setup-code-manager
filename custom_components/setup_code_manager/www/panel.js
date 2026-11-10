@@ -25,7 +25,7 @@ class SetupCodeManagerPanel extends HTMLElement {
     this._t = translator('en');
     this._devices = []; this._haDevices = []; this._revision = 0;
     this._tab = 'all'; this._query = ''; this._protocol = ''; this._missing = false;
-    this._revealed = new Set(); this._formRevealed = new Set(); this._compareRevealed = new Set();
+    this._revealed = new Set(); this._revealedManual = new Set(); this._formRevealed = new Set(); this._compareRevealed = new Set();
     this._loading = true; this._busy = false; this._loadSequence = 0; this._dialogGeneration = 0;
     this._onClick = this._onClick.bind(this);
     this._onInput = this._onInput.bind(this);
@@ -50,6 +50,7 @@ class SetupCodeManagerPanel extends HTMLElement {
   connectedCallback() { this._connected = true; this._start(); }
   disconnectedCallback() {
     this._connected = false; this._started = false; this._loadSequence++; this._dialogGeneration++; this._draft = null; this._modal = null; this._busy = false;
+    this._revealed.clear(); this._revealedManual.clear();
     this._unsubscribe?.(); this._unsubscribe = null;
     clearTimeout(this._eventTimer); clearTimeout(this._toastTimer);
     this._stopCamera(); this._photoController?.abort(); this._photoController = null; this._readingPhoto = false;
@@ -80,6 +81,9 @@ class SetupCodeManagerPanel extends HTMLElement {
       this._devices = result.devices || []; this._revision = result.revision;
       this._instance = result.instance_id; this._legacyAvailable = !!result.legacy_available;
       this._loadError = ''; this._loading = false;
+      const previousIdentity = this._draft && JSON.stringify([this._draft.name,this._draft.location]);
+      this._applyDraftIdentity();
+      if (this._draft && previousIdentity !== JSON.stringify([this._draft.name,this._draft.location]) && this._modal?.kind === 'editor' && !this._busy) this._renderModal();
       if (this._selectedId && !this._devices.some(record => record.id === this._selectedId)) this._selectedId = null;
       this._renderMain();
       return result;
@@ -127,6 +131,28 @@ class SetupCodeManagerPanel extends HTMLElement {
       return !query || [record.name, record.location, record.manufacturer, record.model, record.serial_number].join(' ').toLocaleLowerCase().includes(query);
     }).sort((a,b) => (a.name || '').localeCompare(b.name || '', this._hass?.language));
   }
+  _codeStatus(record) {
+    const stored = hasCode(record);
+    return `<span class="code-status ${stored ? 'stored' : 'missing'}">${stored ? icon('check') : ''}${esc(this._t(stored ? 'codeStored' : 'noCode'))}</span>`;
+  }
+  _identityManaged(record = this._draft) { return !!record?.links?.some(link => link.active !== false); }
+  _applyDraftIdentity() {
+    if (!this._identityManaged()) return;
+    const links = this._draft.links.filter(link => link.active !== false);
+    const sources = links.map(link => {
+      const live = this._devices.flatMap(record => record.links || []).find(item => item.ha_device_id === link.ha_device_id && item.active !== false);
+      const cached = this._haDevices.find(device => device.id === link.ha_device_id);
+      return live && typeof live.location === 'string' ? live : cached || link;
+    });
+    if (!sources.every(source => source.name && typeof source.location === 'string')) return;
+    const combined = key => [...new Set(sources.map(source => source[key]).filter(Boolean))].sort((a,b) => a.toLowerCase() < b.toLowerCase() ? -1 : a.toLowerCase() > b.toLowerCase() ? 1 : 0).join(' / ').slice(0,256);
+    this._draft.name = combined('name'); this._draft.location = combined('location');
+  }
+  _renderIdentity() {
+    if (!this._identityManaged()) return this._field('name') + this._field('location');
+    const t = this._t;
+    return `<section class="record-identity" aria-label="${esc(t('haIdentity'))}"><dl><dt>${esc(t('name'))}</dt><dd>${esc(this._draft.name)}</dd><dt>${esc(t('location'))}</dt><dd>${esc(this._draft.location || t('noArea'))}</dd></dl><p class="small muted">${esc(t('haIdentityHint'))}</p></section>`;
+  }
   _status(record) {
     const linked = isLinked(record);
     const available = record.available;
@@ -154,7 +180,7 @@ class SetupCodeManagerPanel extends HTMLElement {
       const filtered = !!(this._query || this._protocol || this._missing);
       const title = filtered ? 'noResults' : this._tab === 'archive' ? 'emptyArchive' : this._tab === 'linked' ? 'emptyLinked' : this._tab === 'unlinked' && this._devices.length ? 'emptyUnlinked' : 'emptyTitle';
       content = `<div class="empty">${icon(this._tab === 'archive' ? 'archive' : 'key')}<h2>${esc(t(title))}</h2><p>${esc(t(filtered ? 'noResultsBody' : this._tab === 'archive' ? 'emptyArchiveBody' : 'emptyBody'))}</p>${this._button(filtered ? 'reset-filters' : 'add', t(filtered ? 'resetFilters' : 'add'), filtered ? 'filter' : 'plus', filtered ? '' : 'primary')}</div>`;
-    } else content = `<div class="table-wrap"><table class="device-table"><colgroup><col class="device-col" style="width:34%"><col class="location-column" style="width:19%"><col class="codes-col" style="width:21%"><col class="status-col" style="width:26%"></colgroup><thead><tr><th scope="col">${esc(t('device'))}</th><th scope="col" class="location-column">${esc(t('location'))}</th><th scope="col">${esc(t('codes'))}</th><th scope="col">Home Assistant</th></tr></thead><tbody>${rows.map(record => `<tr data-action="select" data-id="${esc(record.id)}" class="${selected?.id === record.id ? 'selected' : ''}"><td><div class="device-name">${icon(deviceIcon(record))}<div><button type="button" class="row-open" data-action="select" data-id="${esc(record.id)}">${esc(record.name)}</button><div class="mobile-meta">${esc([record.location, displayProtocols(record).map(p => protocolNames[p]).join(', ')].filter(Boolean).join(' · '))}${!recordCodes(record).length ? ` · ${esc(t('noCode'))}` : ''}</div><div class="mobile-codes">${this._status(record)}</div></div></div></td><td class="location-column">${esc(record.location || '—')}</td><td><div class="code-summary">${esc(displayProtocols(record).map(p => protocolNames[p]).join(', ') || '—')}<div class="muted">${esc(t(recordCodes(record).length ? 'stored' : 'noCode'))}</div></div></td><td>${this._status(record)}</td></tr>`).join('')}</tbody></table></div>`;
+    } else content = `<div class="table-wrap"><table class="device-table"><colgroup><col class="device-col" style="width:34%"><col class="location-column" style="width:19%"><col class="codes-col" style="width:21%"><col class="status-col" style="width:26%"></colgroup><thead><tr><th scope="col">${esc(t('device'))}</th><th scope="col" class="location-column">${esc(t('location'))}</th><th scope="col">${esc(t('codes'))}</th><th scope="col">Home Assistant</th></tr></thead><tbody>${rows.map(record => `<tr data-action="select" data-id="${esc(record.id)}" class="${selected?.id === record.id ? 'selected' : ''}"><td><div class="device-name">${icon(deviceIcon(record))}<div><button type="button" class="row-open" data-action="select" data-id="${esc(record.id)}">${esc(record.name)}</button><div class="mobile-meta">${esc([record.location, displayProtocols(record).map(p => protocolNames[p]).join(', ')].filter(Boolean).join(' · '))}</div><div class="mobile-codes">${this._codeStatus(record)}${this._status(record)}</div></div></div></td><td class="location-column">${esc(record.location || '—')}</td><td><div class="code-summary">${esc(displayProtocols(record).map(p => protocolNames[p]).join(', ') || '—')}<div>${this._codeStatus(record)}</div></div></td><td>${this._status(record)}</td></tr>`).join('')}</tbody></table></div>`;
     this.shadowRoot.getElementById('app').innerHTML = `<div class="app"><div class="workspace ${selected ? 'has-details' : ''}"><main class="main"><header class="topbar"><button type="button" class="icon-button menu-button" data-action="ha-menu" aria-label="${esc(t('menu'))}">${icon('menu')}</button><h1>Setup Code Manager</h1><span class="refresh-action">${this._iconButton('refresh', t('refresh'), 'refresh')}</span><span class="mobile-toolbar">${this._iconButton('menu', t('menu'), 'more')}</span></header><div class="toolbar">${this._button('add',t('add'),'plus','primary')}${this._button('import',t('import'),'download','secondary-action')}${this._button('export',t('export'),'upload','secondary-action')}</div><nav class="tabs" aria-label="${esc(t('device'))}">${['all','linked','unlinked','archive'].map(tab => `<button type="button" class="tab ${this._tab === tab ? 'active' : ''}" data-action="tab" data-tab="${tab}" aria-pressed="${this._tab === tab}">${esc(t(tab))}<span class="count">${counts[tab]}</span></button>`).join('')}</nav><p class="caption">${esc(t(this._tab === 'archive' ? 'archiveHint' : 'activeHint'))}</p><div class="filters"><label class="search">${icon('search')}<input type="search" data-field="search" data-focus="search" placeholder="${esc(t('search'))}" aria-label="${esc(t('search'))}" value="${esc(this._query)}"></label><select data-field="protocol-filter" aria-label="${esc(t('protocol'))}" data-focus="protocol-filter"><option value="">${esc(t('allProtocols'))}</option>${PROTOCOLS.map(p => `<option value="${p}" ${this._protocol === p ? 'selected' : ''}>${protocolNames[p]}</option>`).join('')}</select><label class="check-label"><input type="checkbox" data-field="missing" ${this._missing ? 'checked' : ''}>${esc(t('missingOnly'))}</label></div>${this._loadError ? this._notice(this._loadError, 'error', `<div>${this._button('refresh',t('retry'),'refresh','text')}</div>`) : ''}${content}${this._legacyAvailable ? `<div class="banner">${this._notice(t('legacyHint'),'',`<div>${this._button('legacy',t('legacyAction'),'download','text')}</div>`)}</div>` : ''}</main>${selected ? this._renderDetails(selected) : ''}</div></div>`;
     this._renderedListKey = listKey;
     const main = this.shadowRoot.querySelector('.main');
@@ -169,14 +195,47 @@ class SetupCodeManagerPanel extends HTMLElement {
   _closeDetails() {
     const id = this._selectedId;
     if (!id) return;
-    this._selectedId = null; this._revealed.clear(); this._renderMain();
+    this._selectedId = null; this._revealed.clear(); this._revealedManual.clear(); this._renderMain();
     const row = [...this.shadowRoot.querySelectorAll('.row-open')].find(element => element.dataset.id === id);
     (row || this.shadowRoot.querySelector('[data-field="search"]'))?.focus();
   }
   _renderDetails(record) {
     const t = this._t;
     const links = record.links || [];
-    return `<aside class="details" aria-label="${esc(record.name)}"><div class="detail-heading"><div><h2 title="${esc(record.name)}">${esc(record.name)}</h2></div>${this._iconButton('close-details',t('close'),'close')}</div><div class="detail-body"><div class="detail-meta"><p>${esc([record.location,record.model].filter(Boolean).join(' · ') || record.manufacturer || '')}</p>${record.archived ? `<span class="badge">${icon('archive')}${esc(t('archived'))}</span>` : ''}</div><div class="detail-actions">${this._button('edit',t('edit'),'','text',`data-id="${esc(record.id)}"`)}</div><section class="detail-section"><h3>Home Assistant</h3><div class="detail-status">${this._status(record)}</div>${links.some(link => link.active === false) ? `<p class="muted small" style="margin-top:12px">${esc(t('removedHint'))}</p>` : ''}${links.filter(link => link.active !== false).map(link => `<div class="link-item"><span class="small muted">${esc(link.name || record.name)}</span><a class="button" href="/config/devices/device/${encodeURIComponent(link.ha_device_id)}">${icon('external')}${esc(t('openDevice'))}</a></div>`).join('')}${this._button('edit-links',t(links.length ? 'changeLinks' : 'linkDevice'),'link','text',`data-id="${esc(record.id)}"`)}</section><section class="detail-section"><h3>${esc(t('setupCodes'))}</h3>${recordCodes(record).length ? recordCodes(record).map(code => `<div class="code-card"><div class="code-title"><div><strong>${esc(protocolNames[code.protocol] || code.protocol)}</strong><small>${esc(code.label || t('originalCode'))}</small></div><div class="code-actions">${this._iconButton('reveal',t(this._revealed.has(code.id) ? 'hide' : 'reveal'),'eye',`data-code="${esc(code.id)}"`)}${this._iconButton('copy',t('copy'),'copy',`data-code="${esc(code.id)}"`)}${this._canQR(code) ? this._iconButton('qr',t('qr'),'qr',`data-code="${esc(code.id)}"`) : ''}</div></div><div class="secret ${this._revealed.has(code.id) ? '' : 'masked'}">${this._revealed.has(code.id) ? esc(code.value) : '••••••••••••'}</div></div>`).join('') : `<p class="muted">${esc(t('noCode'))}</p>`}${this._button('edit-codes',t('addCode'),'plus','text',`data-id="${esc(record.id)}"`)}</section><section class="detail-section"><h3>${esc(t('note'))}</h3><p class="muted">${esc(record.notes || t('noNote'))}</p>${record.manufacturer || record.serial_number ? `<p class="small muted" style="margin-top:16px">${esc([record.manufacturer, record.serial_number].filter(Boolean).join(' · '))}</p>` : ''}</section><section class="detail-section detail-bottom">${this._button('archive',t(record.archived ? 'restore' : 'archiveAction'),record.archived ? 'restore' : 'archive','text',`data-id="${esc(record.id)}"`)}${this._button('delete',t('delete'),'trash','text danger',`data-id="${esc(record.id)}"`)}</section></div></aside>`;
+    return `<aside class="details" aria-label="${esc(record.name)}"><div class="detail-heading"><div><h2 title="${esc(record.name)}">${esc(record.name)}</h2></div>${this._iconButton('close-details',t('close'),'close')}</div><div class="detail-body"><div class="detail-meta">${this._codeStatus(record)}<p>${esc([record.location,record.model].filter(Boolean).join(' · ') || record.manufacturer || '')}</p>${record.archived ? `<span class="badge">${icon('archive')}${esc(t('archived'))}</span>` : ''}</div><div class="detail-actions">${this._button('edit',t('edit'),'','text',`data-id="${esc(record.id)}"`)}</div><section class="detail-section"><h3>Home Assistant</h3><div class="detail-status">${this._status(record)}</div>${links.some(link => link.active === false) ? `<p class="muted small" style="margin-top:12px">${esc(t('removedHint'))}</p>` : ''}${links.filter(link => link.active !== false).map(link => `<div class="link-item"><span class="small muted">${esc(link.name || record.name)}</span><a class="button" href="/config/devices/device/${encodeURIComponent(link.ha_device_id)}">${icon('external')}${esc(t('openDevice'))}</a></div>`).join('')}${this._button('edit-links',t(links.length ? 'changeLinks' : 'linkDevice'),'link','text',`data-id="${esc(record.id)}"`)}</section><section class="detail-section"><h3>${esc(t('setupCodes'))}</h3>${recordCodes(record).length ? recordCodes(record).map(code => this._renderCode(code)).join('') : `<p class="muted">${esc(t('noCode'))}</p>`}${this._button('edit-codes',t('addCode'),'plus','text',`data-id="${esc(record.id)}"`)}</section><section class="detail-section"><h3>${esc(t('note'))}</h3><p class="muted">${esc(record.notes || t('noNote'))}</p>${record.manufacturer || record.serial_number ? `<p class="small muted" style="margin-top:16px">${esc([record.manufacturer, record.serial_number].filter(Boolean).join(' · '))}</p>` : ''}</section><section class="detail-section detail-bottom">${this._button('archive',t(record.archived ? 'restore' : 'archiveAction'),record.archived ? 'restore' : 'archive','text',`data-id="${esc(record.id)}"`)}${this._button('delete',t('delete'),'trash','text danger',`data-id="${esc(record.id)}"`)}</section></div></aside>`;
+  }
+  _manualValue(code) {
+    return code?.protocol === 'matter' && code.value?.startsWith('MT:') && typeof code.manual_value === 'string' && /^(?:[0-9]{11}|[0-9]{21})$/.test(code.manual_value) ? code.manual_value : '';
+  }
+  _renderManualCode(code) {
+    const value = this._manualValue(code);
+    if (!value) return '';
+    const t = this._t; const revealed = this._revealedManual.has(code.id);
+    const formatted = value.length === 11 ? `${value.slice(0,4)}-${value.slice(4,7)}-${value.slice(7)}` : `${value.slice(0,4)}-${value.slice(4,7)}-${value.slice(7,10)}-${value.slice(10,15)}-${value.slice(15,20)}-${value.slice(20)}`;
+    return `<div class="manual-code"><div class="code-title"><div><strong>${esc(t('manualCode'))}</strong><small>${esc(t('manualDerived'))}</small></div><div class="code-actions">${this._iconButton('reveal-manual',t(revealed ? 'manualHide' : 'manualReveal'),'eye',`data-code="${esc(code.id)}"`)}${this._iconButton('copy-manual',t('manualCopy'),'copy',`data-code="${esc(code.id)}"`)}</div></div><div class="secret ${revealed ? '' : 'masked'}">${revealed ? esc(formatted) : '••••••••••••'}</div></div>`;
+  }
+  _renderCode(code) {
+    const t = this._t;
+    return `<div class="code-card"><div class="code-title"><div><strong>${esc(protocolNames[code.protocol] || code.protocol)}</strong><small>${esc(code.label || t('originalCode'))}</small></div><div class="code-actions">${this._iconButton('reveal',t(this._revealed.has(code.id) ? 'hide' : 'reveal'),'eye',`data-code="${esc(code.id)}"`)}${this._iconButton('copy',t('copy'),'copy',`data-code="${esc(code.id)}"`)}${this._canQR(code) ? this._iconButton('qr',t('qr'),'qr',`data-code="${esc(code.id)}"`) : ''}</div></div>${this._manualValue(code) ? `<div class="code-value-label">${esc(t('qrContent'))}</div>` : ''}<div class="secret ${this._revealed.has(code.id) ? '' : 'masked'}">${this._revealed.has(code.id) ? esc(code.value) : '••••••••••••'}</div>${this._renderManualCode(code)}</div>`;
+  }
+  async _copyCodeValue(value, successKey = 'copied', failureKey = 'copyFailed') {
+    if (!value) return;
+    try {
+      if (typeof navigator.clipboard?.writeText === 'function') await navigator.clipboard.writeText(value);
+      else {
+        // Native copy still works during a user click on local HTTP installations.
+        const previous = this.shadowRoot.activeElement;
+        const input = document.createElement('textarea');
+        input.value = value; input.readOnly = true;
+        input.style.cssText = 'position:fixed;left:-9999px;top:0;font-size:16px';
+        this.shadowRoot.appendChild(input);
+        try {
+          input.focus({preventScroll:true}); input.select();
+          if (!document.execCommand?.('copy')) throw new Error('copy_unavailable');
+        } finally { input.remove(); previous?.focus({preventScroll:true}); }
+      }
+      this._toast(this._t(successKey));
+    } catch { this._toast(this._t(failureKey)); }
   }
   _canQR(code) { return /^(MT:|X-HM:\/\/)/.test(code.value || '') || code.protocol === 'zwave' && /^90\d{30,}$/.test(code.value || ''); }
   _newDraft(record) {
@@ -234,7 +293,7 @@ class SetupCodeManagerPanel extends HTMLElement {
     dialog.showModal();
     if (this._busy) dialog.querySelectorAll('input,select,textarea,button').forEach(control => { control.disabled = this._busyBlocks(control.dataset.action); });
     if (snapshot && snapshot.key !== 'search') this._restoreFocus(snapshot);
-    else if (kind === 'editor') this.shadowRoot.querySelector('[data-field="name"]')?.focus({preventScroll:true});
+    else if (kind === 'editor') this.shadowRoot.querySelector(this._identityManaged() ? '[data-field="notes"]' : '[data-field="name"]')?.focus({preventScroll:true});
     else if (kind === 'picker') this.shadowRoot.querySelector('[data-field="picker-search"]')?.focus({preventScroll:true});
     if (kind === 'qr') {
       try { this.shadowRoot.getElementById('qr-display').innerHTML = window.SetupCodesQR.renderSVG(this._modal.code.value,{pixelSize:6,whiteColor:'#ffffff',blackColor:'#000000'}); }
@@ -245,9 +304,10 @@ class SetupCodeManagerPanel extends HTMLElement {
     return `<label class="field"><span>${esc(this._t(key === 'notes' ? 'note' : key === 'serial_number' ? 'serial' : key))}${key === 'name' ? ' *' : ''}</span>${type === 'textarea' ? `<textarea data-field="${key}" data-focus="${key}" maxlength="10000">${esc(this._draft[key])}</textarea>` : `<input type="${type}" data-field="${key}" data-focus="${key}" value="${esc(this._draft[key])}" ${key === 'name' ? 'required' : ''} maxlength="256" placeholder="${esc(placeholder)}" autocomplete="off">`}</label>`;
   }
   _renderEditor() {
+    this._applyDraftIdentity();
     const t = this._t; const draft = this._draft;
     const errorExtra = this._draftErrorCode === 'conflict' ? `<div>${this._button('compare-revision',t('compareCurrent'),'refresh','text')}</div>` : this._draftErrorCode === 'device_removed' ? `<div>${this._button('unlink-save',t('withoutLinkSave'),'unlink','text')}${this._button('picker',t('pickerTitle'),'link','text')}</div>` : this._draftErrorCode === 'duplicate_link' || this._draftErrorCode === 'archived_target' ? `<div>${this._button('picker',t('pickerTitle'),'link','text')}</div>` : '';
-    const body = `${this._readingPhoto ? `<div class="notice" role="status"><span class="spinner" aria-hidden="true"></span>${esc(t('readingPhoto'))}</div>` : ''}<form id="record-form">${this._detected ? this._notice(t('codeDetected',{protocol:protocolNames[this._detected]}),'success') : ''}${draft.archived ? this._notice(t('archivedTarget')) : ''}${this._draftError ? this._notice(this._draftError,'error',errorExtra) : ''}${this._field('name')}${this._field('location')}<details class="more" ${this._moreOpen ? 'open' : ''}><summary>${esc(t('moreDetails'))}</summary><div><div class="field-row">${this._field('manufacturer')}${this._field('model')}</div>${this._field('serial_number')}${this._field('notes','textarea')}</div></details><section class="editor-section"><h3>${esc(t('setupCodes'))}</h3>${draft.codes.map((code,index) => `<div class="editor-code"><div class="code-title"><select data-field="code-protocol" data-index="${index}" aria-label="${esc(t('protocol'))}">${PROTOCOLS.map(p => `<option value="${p}" ${code.protocol === p ? 'selected' : ''} ${draft.codes.some((other,i) => i !== index && other.protocol === p) ? 'disabled' : ''}>${protocolNames[p]}</option>`).join('')}</select>${this._iconButton('remove-code',t('removeCode'),'trash',`data-index="${index}"`)}</div><label class="field"><span>${esc(t('codeValue'))}</span><div class="input-secret"><input type="${this._formRevealed.has(code.id) ? 'text' : 'password'}" data-field="code-value" data-focus="code-${index}" data-index="${index}" value="${esc(code.value)}" autocomplete="off" spellcheck="false" maxlength="4096">${this._iconButton('form-reveal',t(this._formRevealed.has(code.id) ? 'hide' : 'reveal'),'eye',`data-index="${index}"`)}</div></label><div class="code-tools">${this._button('code-scan',t(this._canLiveScan() ? (code.value ? 'rescan' : 'scan') : 'takePhoto'),'camera','text',`data-protocol="${code.protocol}"`)}${this._button('code-photo',t('photo'),'image','text',`data-protocol="${code.protocol}"`)}</div><label class="field"><span>${esc(t('codeLabel'))}</span><input type="text" data-field="code-label" data-focus="label-${index}" data-index="${index}" value="${esc(code.label)}" placeholder="${esc(t('codeLabelPlaceholder'))}" maxlength="256"></label></div>`).join('')}${draft.codes.length < PROTOCOLS.length ? this._button('add-slot',t('addCode'),'plus','text') : ''}</section><section class="editor-section"><h3>Home Assistant</h3><div class="link-box">${draft.links?.length ? draft.links.map((link,index) => `<div class="link-item">${icon('link')}<span>${esc(link.name || this._haDevices.find(d => d.id === link.ha_device_id)?.name || this._devices.find(r => r.links?.some(l => l.ha_device_id === link.ha_device_id))?.name || link.ha_device_id)}${link.active === false ? `<small class="muted" style="display:block">${esc(t('unlinked'))}</small>` : ''}</span>${this._iconButton('remove-link',t('removeLink'),'close',`data-index="${index}"`)}</div>`).join('') : `<p class="muted">${esc(t('noLink'))}</p>`}${this._button('picker',t(draft.links?.length ? 'changeLinks' : 'linkDevice'),'link','text')}<p class="muted">${esc(t('linkLater'))}</p></div></section></form>`;
+    const body = `${this._readingPhoto ? `<div class="notice" role="status"><span class="spinner" aria-hidden="true"></span>${esc(t('readingPhoto'))}</div>` : ''}<form id="record-form">${this._detected ? this._notice(t('codeDetected',{protocol:protocolNames[this._detected]}),'success') : ''}${draft.archived ? this._notice(t('archivedTarget')) : ''}${this._draftError ? this._notice(this._draftError,'error',errorExtra) : ''}${this._renderIdentity()}${this._field('notes','textarea')}<details class="more" ${this._moreOpen ? 'open' : ''}><summary>${esc(t('moreDetails'))}</summary><div><div class="field-row">${this._field('manufacturer')}${this._field('model')}</div>${this._field('serial_number')}</div></details><section class="editor-section"><h3>${esc(t('setupCodes'))}</h3>${draft.codes.map((code,index) => `<div class="editor-code"><div class="code-title"><select data-field="code-protocol" data-index="${index}" aria-label="${esc(t('protocol'))}">${PROTOCOLS.map(p => `<option value="${p}" ${code.protocol === p ? 'selected' : ''} ${draft.codes.some((other,i) => i !== index && other.protocol === p) ? 'disabled' : ''}>${protocolNames[p]}</option>`).join('')}</select>${this._iconButton('remove-code',t('removeCode'),'trash',`data-index="${index}"`)}</div><label class="field"><span>${esc(t('codeValue'))}</span><div class="input-secret"><input type="${this._formRevealed.has(code.id) ? 'text' : 'password'}" data-field="code-value" data-focus="code-${index}" data-index="${index}" value="${esc(code.value)}" autocomplete="off" spellcheck="false" maxlength="4096">${this._iconButton('form-reveal',t(this._formRevealed.has(code.id) ? 'hide' : 'reveal'),'eye',`data-index="${index}"`)}</div></label><div class="code-tools">${this._button('code-scan',t(this._canLiveScan() ? (code.value ? 'rescan' : 'scan') : 'takePhoto'),'camera','text',`data-protocol="${code.protocol}"`)}${this._button('code-photo',t('photo'),'image','text',`data-protocol="${code.protocol}"`)}</div><label class="field"><span>${esc(t('codeLabel'))}</span><input type="text" data-field="code-label" data-focus="label-${index}" data-index="${index}" value="${esc(code.label)}" placeholder="${esc(t('codeLabelPlaceholder'))}" maxlength="256"></label></div>`).join('')}${draft.codes.length < PROTOCOLS.length ? this._button('add-slot',t('addCode'),'plus','text') : ''}</section><section class="editor-section"><h3>Home Assistant</h3><div class="link-box">${draft.links?.length ? draft.links.map((link,index) => `<div class="link-item">${icon('link')}<span>${esc(link.name || this._haDevices.find(d => d.id === link.ha_device_id)?.name || this._devices.find(r => r.links?.some(l => l.ha_device_id === link.ha_device_id))?.name || link.ha_device_id)}${link.active === false ? `<small class="muted" style="display:block">${esc(t('unlinked'))}</small>` : ''}</span>${this._iconButton('remove-link',t('removeLink'),'close',`data-index="${index}"`)}</div>`).join('') : `<p class="muted">${esc(t('noLink'))}</p>`}${this._button('picker',t(draft.links?.length ? 'changeLinks' : 'linkDevice'),'link','text')}<p class="muted">${esc(t('linkLater'))}</p></div></section></form>`;
     return this._modalFrame(t(draft.id ? 'editTitle' : 'addTitle'),body,this._button('close-modal',t('cancel'))+`<button type="submit" form="record-form" class="button primary" ${this._busy ? 'disabled' : ''}>${this._busy && !this._readingPhoto ? '<span class="spinner"></span>' : ''}${esc(t(this._busy && !this._readingPhoto ? 'saving' : 'save'))}</button>`);
   }
   _pickerRecords(device) { return this._devices.filter(record => (device.record_ids || []).includes(record.id) || record.links?.some(link => link.ha_device_id === device.id)); }
@@ -300,8 +360,9 @@ class SetupCodeManagerPanel extends HTMLElement {
     }
     this._draft.links ||= [];
     const selectedLink = this._draft.links.find(link => link.ha_device_id === device.id);
-    if (selectedLink) Object.assign(selectedLink,{active:true,name:device.name,available:device.available});
-    else this._draft.links.push({ ha_device_id:device.id, name:device.name, active:true, available:device.available });
+    if (selectedLink) Object.assign(selectedLink,{active:true,name:device.name,location:device.location,available:device.available});
+    else this._draft.links.push({ ha_device_id:device.id, name:device.name, location:device.location, active:true, available:device.available });
+    this._applyDraftIdentity();
     this._dirty = true; this._draftError = ''; this._draftErrorCode = '';
     this._applyPendingCodes();
   }
@@ -403,12 +464,13 @@ class SetupCodeManagerPanel extends HTMLElement {
   }
   async _save(ignoreDuplicates = false) {
     if (!this._draft || this._busy) return;
+    this._applyDraftIdentity();
     const form = this.shadowRoot.getElementById('record-form');
     if (form && !form.reportValidity()) return;
     const record = Object.fromEntries(['id','name','manufacturer','model','serial_number','location','notes','archived','codes','links','created_at','updated_at','source_refs'].filter(key => this._draft[key] !== undefined).map(key => [key,clone(this._draft[key])]));
     record.links = (record.links || []).map(link => ({ha_device_id:link.ha_device_id,...(typeof link.active === 'boolean' ? {active:link.active} : {})}));
     record.name = record.name.trim();
-    record.codes = record.codes.filter(code => code.value?.trim()).map(code => ({...code,value:code.value.trim()}));
+    record.codes = record.codes.filter(code => code.value?.trim()).map(({id,protocol,value,label}) => ({id,protocol,value:value.trim(),label}));
     if (!record.name) { this._draftError = this._t('validationError'); this._openModal('editor'); return; }
     if (!ignoreDuplicates) {
       const matches = this._devices.filter(other => other.id !== record.id && recordCodes(other).some(code => record.codes.some(incoming => incoming.protocol === code.protocol && incoming.value === code.value)));
@@ -498,6 +560,7 @@ class SetupCodeManagerPanel extends HTMLElement {
   }
   _onInput(event) {
     const el = event.target; const field = el.dataset.field;
+    if (['name','location'].includes(field) && this._identityManaged()) return;
     if (field === 'search') { this._query = el.value; this._renderMain(); }
     else if (field === 'picker-search') { this._pickerQuery = el.value; this._renderModal(); }
     else if (this._draft && ['name','location','manufacturer','model','serial_number','notes'].includes(field)) { this._draft[field] = el.value; this._dirty = true; }
@@ -528,7 +591,7 @@ class SetupCodeManagerPanel extends HTMLElement {
       else if (action === 'refresh-menu') { this._closeModal(true); await this._refresh(); }
       else if (action === 'tab') { this._tab = button.dataset.tab; this._selectedId = null; this._renderMain(); }
       else if (action === 'reset-filters') { this._query = ''; this._protocol = ''; this._missing = false; this._renderMain(); }
-      else if (action === 'select') { this._selectedId = id; this._revealed.clear(); this._renderMain(); this.scrollIntoView({block:'start',behavior:'instant'}); this.shadowRoot.querySelector('.detail-heading h2')?.setAttribute('tabindex','-1'); this.shadowRoot.querySelector('.detail-heading h2')?.focus({preventScroll:true}); }
+      else if (action === 'select') { this._selectedId = id; this._revealed.clear(); this._revealedManual.clear(); this._renderMain(); this.scrollIntoView({block:'start',behavior:'instant'}); this.shadowRoot.querySelector('.detail-heading h2')?.setAttribute('tabindex','-1'); this.shadowRoot.querySelector('.detail-heading h2')?.focus({preventScroll:true}); }
       else if (action === 'close-details') this._closeDetails();
       else if (action === 'menu') this._openModal('menu');
       else if (action === 'add') { this._newDraft(); this._openModal('start'); }
@@ -549,10 +612,12 @@ class SetupCodeManagerPanel extends HTMLElement {
       else if (action === 'back-editor') this._openModal('editor');
       else if (action === 'add-slot') { this._addSlot(); this._renderModal(); }
       else if (action === 'remove-code') { this._draft.codes.splice(Number(button.dataset.index),1); this._dirty = true; this._renderModal(); }
-      else if (action === 'remove-link') { this._draft.links.splice(Number(button.dataset.index),1); this._dirty = true; this._renderModal(); }
+      else if (action === 'remove-link') { this._draft.links.splice(Number(button.dataset.index),1); this._applyDraftIdentity(); this._dirty = true; this._renderModal(); }
       else if (action === 'form-reveal') { const key = this._draft.codes[Number(button.dataset.index)].id; this._formRevealed.has(key) ? this._formRevealed.delete(key) : this._formRevealed.add(key); this._renderModal(); }
       else if (action === 'reveal' && code) { this._revealed.has(code.id) ? this._revealed.delete(code.id) : this._revealed.add(code.id); this._renderMain(); }
-      else if (action === 'copy' && code) { try { await navigator.clipboard.writeText(code.value); this._toast(this._t('copied')); } catch { this._toast(this._t('copyFailed')); } }
+      else if (action === 'reveal-manual' && this._manualValue(code)) { this._revealedManual.has(code.id) ? this._revealedManual.delete(code.id) : this._revealedManual.add(code.id); this._renderMain(); }
+      else if (action === 'copy-manual' && this._manualValue(code)) await this._copyCodeValue(this._manualValue(code),'manualCopied','manualCopyFailed');
+      else if (action === 'copy' && code) await this._copyCodeValue(code.value);
       else if (action === 'qr' && code) this._openModal('qr',{code,name:record.name});
       else if (action === 'archive' && record) await this._archiveRecord(record);
       else if (action === 'delete' && record) this._openModal('delete',{record,revision:this._revision});
