@@ -5,8 +5,10 @@ Die visuelle Gestaltungsrichtung wurde vom Nutzer bestätigt. Ergänzend wurde e
 direkte Auswahl von HA-Geräten ohne passenden gespeicherten Code festgelegt;
 dieser Picker ist im [Bildschirmkonzept](../SCREENS.de.md) beschrieben.
 Die Bilder zeigen keine implementierte oder getestete Home-Assistant-Oberfläche.
-Eine klickbare Vorschau und die eigentliche Integration sind noch nicht umgesetzt.
-Diese Entwürfe sind zunächst lokal gespeichert, noch nicht auf GitHub übertragen.
+Diese Entwürfe dokumentieren die ursprüngliche Gestaltungsabstimmung. Die Integration
+und eine lokale Vorschau sind inzwischen umgesetzt; den aktuellen Produktstand
+beschreibt die [README](../../README.md). Aktuelle Screenshots mit Beispieldaten
+liegen unter [docs/screenshots](../screenshots/).
 
 ## Ansichten
 

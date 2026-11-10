@@ -20,15 +20,18 @@ The full Git history and original LICENSE are retained. The original README is
 preserved in [UPSTREAM_README.md](UPSTREAM_README.md). The bundled QR encoder
 credits Project Nayuki and Anthony Fu; its license notices must remain.
 
-The first local development version uses `custom_components/setup_code_manager`,
+The integration uses `custom_components/setup_code_manager`,
 its own domain, sidebar panel, WebSocket command prefix and storage key. The
 original `.storage/setup_codes` file is read only when the user requests a
 migration preview. The original integration can remain installed during that
 comparison; the two inventories are independent after import.
 
-There is no published release or Marketplace catalog submission yet. Actual
-installation, camera and full backup/restore acceptance remain documented in
-[TESTING.de.md](TESTING.de.md).
+Published beta releases are available from the [release page](https://github.com/durkadigital/setup-code-manager/releases).
+The project is installable as a custom repository; general Marketplace catalog
+submission has not yet been made. Installation, camera and backup/restore
+verification are documented separately in [TESTING.de.md](TESTING.de.md).
+The former migration banner and its UI action were removed in 0.1.0b6. The backend
+compatibility path and the original source data remain unchanged.
 
 The local scanner additionally bundles jsqr@1.4.0 under Apache-2.0, with the
 complete license, npm origin and SHA-256 checksums in

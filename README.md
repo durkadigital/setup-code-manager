@@ -1,211 +1,138 @@
 # Setup Code Manager
 
-Geräte und Einrichtungscodes in Home Assistant verwalten, lokal scannen und sichern.
+**Einrichtungscodes griffbereit. Direkt in Home Assistant.**
 
-**Entwicklungsstand [0.1.0b5](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b5): zusammenpassende Oberflächendateien nach Updates.
-Die Cachekorrektur ist lokal geprüft; die Abnahme auf dem Zielsystem steht noch aus.
-Noch keine stabile Version oder allgemeine Katalogaufnahme.**
-Nach einem Update konnte Safari ältere Übersetzungen zu einem neuen Panel laden
-und beispielsweise `codeStored` statt **Gespeichert** anzeigen. Beta 5 lädt das
-Panel und seine weiteren JavaScript-, CSS- und Decoderdateien über einen gemeinsamen
-versionsbezogenen Pfad. [Änderungen und Grenzen von Beta 5](docs/releases/0.1.0b5.md).
+Verwalte Matter-, HomeKit- und Z-Wave-Codes zusammen mit deinen Geräten.
+Scanne einen QR-Code, wähle ein Foto oder gib den Code von Hand ein.
+Dein Inventar bleibt lokal in Home Assistant und auch ohne Geräteverknüpfung erhalten.
 
-Auf dem Zielsystem wurde am 10. November 2026 nach einer lokalen verschlüsselten
-Sicherung **0.1.0b4** installiert und Home Assistant neu gestartet. Danach waren
-neun Geräte sichtbar, davon sechs mit gespeicherten Codes; verknüpfte HA-Angaben
-wurden aktualisiert. Dabei wurde der oben beschriebene Cachefehler festgestellt.
-Die Fotoaufnahme in der iPhone-Companion-App war bereits mit **0.1.0b2** bestätigt.
-Die Livekamera über den vorhandenen HTTPS-Zugang, weitere Smartphone-Tests,
-Export und vollständige Wiederherstellung im Zielsystem bleiben offen
-([Teststand](docs/TESTING.de.md)).
-Die Oberfläche ist auf Deutsch und Englisch verfügbar.
+[Installation](docs/INSTALLATION.de.md) ·
+[Vorabversion 0.1.0b6](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b6) ·
+[Sicherung](docs/BACKUP.de.md) ·
+[English](#english)
 
-## Funktionen
+[Im Marketplace hinzufügen](https://my.home-assistant.io/redirect/marketplace_repository/?owner=durkadigital&repository=setup-code-manager&category=integration)
 
-- Eigenständiges Geräteinventar mit Matter-, HomeKit- und Z-Wave-Codes.
-- QR-Code per Kamera oder Foto erfassen; der Decoder wird lokal mitgeliefert.
-- Zu gespeicherten Matter-QRs den manuellen Einrichtungscode automatisch ableiten,
-  separat anzeigen und kopieren, ohne erneut zu scannen.
-- Vorhandene Codes mit grünem **Gespeichert** kennzeichnen. Die Anzeige beschreibt
-  den Codebestand; die Erreichbarkeit des Geräts wird gesondert angezeigt.
-- Namen und Räume verknüpfter Geräte aus Home Assistant übernehmen und bei
-  Änderungen automatisch aktualisieren. Ohne HA-Verknüpfung bleiben eigene
-  Namen und Standorte möglich; Notizen lassen sich jederzeit bearbeiten.
-- Beim Erfassen ein HA-Gerät auswählen. Standardmäßig erscheinen Geräte, denen
-  der gewählte Protokollcode fehlt: Ein vorhandener HomeKit-Code schließt ein
-  Gerät ohne Matter-Code nicht aus. Offline-Geräte bleiben auswählbar.
-- Geräte ohne HA-Verknüpfung speichern. Wird ein HA-Gerät entfernt, bleiben
-  Inventareintrag, eigene Angaben und Codes erhalten.
-- Archivieren, wiederherstellen und ausdrücklich löschen. Löschen betrifft nur
-  unseren Inventareintrag; das HA-Gerät bleibt bestehen und kann später erneut
-  ausgewählt werden.
-- JSON- und CSV-Export inklusive Archiv; Import mit Vorschau und ausdrücklicher
-  Entscheidung bei Konflikten. Ein Import ersetzt niemals ungefragt die gesamte Liste.
-- Übernahme aus dem ursprünglichen Setup Codes über eine Vorschau. Die Quelldatei
-  wird ausschließlich gelesen.
-- Administratorzugriff, maskierte Codeanzeige und atomare Dateispeicherung unter
-  `.storage/setup_code_manager` im HA-Konfigurationsordner.
+![Geräteübersicht von Setup Code Manager mit maskierten Einrichtungscodes](docs/screenshots/overview.png)
 
-Die App koppelt keine Geräte. „Ohne Code“ bezieht sich auf den Bestand dieser App;
-Matter- und HomeKit-Codes werden nicht aus Home Assistant ausgelesen. Unterstützte
-Z-Wave-Geräte können ihre DSK über die vorhandene Integration bereitstellen.
+*Die Abbildung zeigt die lokale Oberflächenvorschau mit Beispieldaten.*
 
-Solange mindestens ein zugehöriges HA-Gerät vorhanden ist, werden Name und Raum
-in Home Assistant gepflegt und hier schreibgeschützt angezeigt. Bei mehreren
-Verknüpfungen werden unterschiedliche Namen und Räume sortiert zusammengefasst.
-Wird das letzte verknüpfte HA-Gerät entfernt, bleiben die zuletzt bekannten Angaben
-und alle Codes erhalten; der Eintrag lässt sich anschließend wieder manuell benennen.
+## Was du damit machen kannst
 
-## Testinstallation
+- **Codes lokal erfassen:** QR-Codes per Livekamera, Fotoaufnahme oder Bildauswahl
+  erkennen. Der QR-Decoder wird mitgeliefert; Bilder werden nicht hochgeladen.
+- **Matter-Codes wiederfinden:** Zu einem gespeicherten Matter-QR den manuellen
+  Einrichtungscode automatisch ableiten, anzeigen und kopieren.
+- **Den Überblick behalten:** Geräte suchen, nach Protokoll oder fehlendem Code
+  filtern und mit Home Assistant verknüpfen. **Code gespeichert** zeigt den Codebestand;
+  die Erreichbarkeit des Geräts wird separat angezeigt.
+- **Passende Angaben sehen:** Namen und Räume verknüpfter Geräte aus Home Assistant
+  automatisch übernehmen. Eigene Notizen bleiben bearbeitbar; unabhängige Einträge
+  können eigene Namen und Standorte haben.
+- **Das Inventar behalten:** Geräte ohne HA-Verknüpfung verwalten, archivieren und
+  wiederherstellen. Wird ein HA-Gerät entfernt, bleiben Inventareintrag und Codes erhalten.
+- **Daten übertragen und sichern:** JSON und CSV einschließlich Archiv exportieren,
+  mit Vorschau importieren und Konflikte bewusst entscheiden. Die Inventardatei
+  wird mit einer HA-Sicherung des Konfigurationsordners erfasst.
 
-Vorgesehen für Home Assistant ab 2026.1; die aktuelle automatisierte Testumgebung
-verwendet **Home Assistant 2026.11.0 / Python 3.14**. Ältere unterstützte HA-Stände
-sind noch nicht praktisch abgenommen. Vor einer Testinstallation eine aktuelle
-HA-Sicherung anlegen und die ursprüngliche Integration samt Daten erhalten.
+Die Oberfläche ist auf Deutsch und Englisch verfügbar. Der Zugriff auf das Panel
+und seine Daten ist auf Home-Assistant-Administratoren beschränkt.
 
-### Über den Marketplace ab Home Assistant 2026.11
+## Installation
 
-Für die Cachekorrektur ausdrücklich **`0.1.0b5`** auswählen. Falls diese Version noch nicht
-angeboten wird, die Repository-Daten aktualisieren und die Versionsauswahl erneut
-öffnen oder die manuelle Installation unten verwenden.
+Setup Code Manager ist eine **benutzerdefinierte Integration** für
+**Home Assistant 2026.11 oder neuer**. Installiere sie über den Marketplace oder
+kopiere sie manuell in `custom_components`. Aktuell ist **0.1.0b6 eine Vorabversion**;
+das Projekt ist noch nicht im allgemeinen Marketplace-Katalog gelistet.
 
-1. **Einstellungen → Marketplace** öffnen und das Repository
-   `https://github.com/durkadigital/setup-code-manager` als benutzerdefiniertes
-   Repository vom Typ **Integration** hinzufügen. Falls angefordert, GitHub verbinden.
-2. Die Repository-Details öffnen und **vor der Installation** die Option
-   **Vorabversionen einschließen** / **Include pre-releases** aktivieren.
-3. Die angebotene Version prüfen: **Setup Code Manager**, **`0.1.0b5`**, neue
-   Integrationskennung **`setup_code_manager`**. Wenn noch **Setup Codes** oder eine
-   frühere Version angeboten wird, nicht installieren; die
-   Repository-Daten aktualisieren und die Versionsauswahl erneut prüfen.
-4. Die Vorabversion installieren und einen vom Marketplace angeforderten
-   Home-Assistant-Neustart ausführen.
-5. Unter **Einstellungen → Geräte & Dienste → Integration hinzufügen** nach
-   **Setup Code Manager** suchen und die gewünschten Geräteintegrationen wählen.
-6. Den neuen Seitenleisteneintrag als Administrator öffnen und zunächst mit
-   Beispieldaten testen; siehe [Abnahmeplan](docs/TESTING.de.md).
+1. **Einstellungen → Marketplace** öffnen und **Add from link** / **Über Link hinzufügen** wählen.
+2. `https://github.com/durkadigital/setup-code-manager` hinzufügen und GitHub verbinden,
+   wenn Home Assistant dazu auffordert.
+3. In den Repository-Details **Vorabversionen** einschließen und **0.1.0b6** auswählen.
+4. Installieren und den Einrichtungsdialog abschließen. Bei einem Update den
+   angeforderten Home-Assistant-Neustart ausführen.
+5. **Setup Code Manager** in der Seitenleiste öffnen.
 
-Home Assistant 2026.11 enthält den Marketplace bereits. Diese Installation über
-ein benutzerdefiniertes Repository ist von einer Aufnahme in den allgemeinen
-Katalog zu unterscheiden; eine Katalogaufnahme ist noch nicht beantragt.
-Der Marketplace bietet Vorabversionen nur nach ausdrücklicher Aktivierung an;
-Details beschreibt die [offizielle Release-Dokumentation](https://contributors.home-assistant.io/marketplace/guides/releases/).
+Lege vor dem Testen eine aktuelle HA-Sicherung an. Manuelle Installation,
+Updates und Hinweise für bestehende HACS-Installationen stehen in der
+[ausführlichen Anleitung](docs/INSTALLATION.de.md).
 
-### Alternativ manuell
+## Gut zu wissen
 
-Nach Veröffentlichung die Version **`0.1.0b5`** auf der
-[Release-Seite](https://github.com/durkadigital/setup-code-manager/releases) auswählen
-und deren **Source code (zip)** laden. Im heruntergeladenen `manifest.json` muss
-`0.1.0b5` stehen.
+Die Livekamera benötigt **HTTPS und eine Kamerafreigabe**. Fotoauswahl und manuelle
+Eingabe stehen als Alternativen zur Verfügung; die Verfügbarkeit der System-Fotoaufnahme
+hängt von Browser und Companion-App ab. Gedruckte Ziffern werden nicht per OCR gelesen.
 
-Den vollständigen Ordner `custom_components/setup_code_manager` nach
-`<HA-Konfiguration>/custom_components/setup_code_manager` kopieren, HA neu starten
-und anschließend **Setup Code Manager** über Geräte & Dienste hinzufügen.
-Der Standardbranch `main` bleibt beim geprüften Stand **`0.1.0b1`** mit der neuen
-Domain `setup_code_manager`. Für die Neuerungen die
-Release-Version **`0.1.0b5`** verwenden. Weitere Betas werden vom Featurebranch
-veröffentlicht.
+Unterstützt werden Matter-QRs (`MT:`), HomeKit-QRs (`X-HM://`), Z-Wave-SmartStart-QRs
+und die jeweiligen manuellen Codes. Pro Gerät wird ein Code je Protokoll gespeichert.
+Zusammengesetzte Matter-QRs und bestimmte optionale Matter-Daten werden abgelehnt.
+Die Integration verwaltet Codes und koppelt selbst keine Geräte. Matter- und
+HomeKit-Codes werden nicht aus Home Assistant ausgelesen.
 
-Die neue Domain `setup_code_manager` ist von `setup_codes` getrennt. Beide können
-zur Migration parallel installiert sein. Im neuen Panel erscheint bei vorhandener
-Originaldatei die Übernahmefunktion. Nach der Übernahme verändert eine Bearbeitung
-in einer der beiden Apps die andere Liste nicht.
+Codes sind in der Oberfläche zunächst maskiert. **JSON- und CSV-Exporte enthalten
+sie im Klartext.** Das Inventar liegt unter `.storage/setup_code_manager` im
+HA-Konfigurationsordner; die Integration ergänzt keine eigene Verschlüsselung.
+Die Bildverarbeitung erfolgt lokal, Bilder werden nicht gespeichert und es gibt
+keinen Cloud-Decoder oder Analysedienst.
 
-`custom_components/setup_codes` und `.storage/setup_codes` der ursprünglichen
-Integration werden dabei weder ersetzt noch gelöscht. Eine Übernahme ist eine
-gesonderte Aktion mit Vorschau; zuerst die neue Version prüfen.
+## Stand und Hilfe
 
-## Scan, Import und Sicherung
+Die bisherigen Prüfungen umfassen automatisierte Tests, einen isolierten Lauf mit
+echtem HA Core sowie Installation und Neustart auf HA 2026.11.1. Fotoaufnahme in der
+iPhone-Companion-App wurde bestätigt. Der Livekameratest auf einem physischen iPhone,
+Export/Import im Zielsystem und ein vollständiger HA-Restore stehen noch aus.
+Den versionsbezogenen Nachweis und weitere offene Fälle beschreibt der
+[Teststand](docs/TESTING.de.md).
 
-Livekamera benötigt HTTPS beziehungsweise einen sicheren Browserkontext und eine
-Kamerafreigabe. Bildauswahl und manuelle Eingabe bleiben als Alternativen verfügbar.
-Ohne verfügbare Livekamera bietet die App seit `0.1.0b2` **Foto aufnehmen** über die Fotoaufnahme
-des Betriebssystems an. **Foto auswählen** bleibt separat verfügbar. Welche
-Kameraauswahl erscheint, hängt vom Browser und der App ab. Die Fotoaufnahme über
-HTTP wurde mit `0.1.0b2` in der iPhone-Companion-App bestätigt.
+Fehler oder Ideen kannst du als [GitHub-Issue](https://github.com/durkadigital/setup-code-manager/issues)
+melden. Nenne HA-Version, Integrationsversion und Schritte zum Nachstellen.
+Entferne echte Einrichtungscodes und persönliche Daten aus Screenshots und Anhängen.
+[Entwicklung und Projektunterlagen](PROJECT.md) enthalten die lokalen Prüfabläufe.
 
-Ein direktes Livebild über HTTP ist damit nicht verfügbar. Home Assistant bietet
-für Custom Panels derzeit keinen unterstützten Ladeweg zum nativen Companion-
-Scanner mit Ergebnisrückgabe. Die App verwendet keine privaten Nachrichtenhandler;
-Netzwerkeinstellungen werden nicht geändert. Für die vorhandene Livekamera ist ein
-gültiger HTTPS-Zugang erforderlich.
+## English
 
-Auf dem Zielsystem ist bereits ein Nabu-Casa-Fernzugang mit gültigem HTTPS aktiv;
-die Anmeldeseite wurde erreicht. Anmeldung und Kameratest auf dem Ziel-iPhone
-stehen noch aus. Für diesen Test ist keine neue Tailscale- oder Netzwerkkonfiguration
-erforderlich. Die Companion-App muss dabei tatsächlich die HTTPS-Adresse verwenden.
+**Keep your device setup codes in Home Assistant.** Setup Code Manager is a custom
+integration for Matter, HomeKit and Z-Wave codes, with a German and English interface.
+It provides a separate device inventory, local QR scanning from a camera or photo,
+manual code entry, search, archive, notes and JSON/CSV import with a preview.
+Saved Matter QR codes also provide the derived manual setup code.
 
-Unterstützt werden Matter-QRs `MT:`, HomeKit-QRs `X-HM://`, Z-Wave-SmartStart-QRs und
-die jeweiligen manuellen Codes. Gedruckte Ziffern werden nicht per OCR erkannt.
-Zusammengesetzte Matter-QRs mit mehreren Payloads sowie nicht unterstützte optionale
-TLV-Typen werden ausdrücklich abgelehnt.
+Link an entry to Home Assistant to keep its device name and area up to date.
+These fields are read-only while linked; notes remain editable. Removing an HA
+device keeps the inventory entry and its codes. Panel and API access require an
+administrator account.
 
-Pro Gerät wird derzeit **ein Code pro Protokoll** gespeichert. Ein Original-QR
-bleibt vollständig erhalten und kann erneut angezeigt werden. Unterschiedliche
-Original- und temporäre Freigabecodes brauchen eine bewusste Auswahl.
+**Install the current pre-release, 0.1.0b6:** In **HA 2026.11+**, open **Settings →
+Marketplace → Add from link**, add
+`https://github.com/durkadigital/setup-code-manager`, connect GitHub when prompted,
+enable **Pre-releases** in the repository details and select **0.1.0b6**. Install
+and complete setup; restart HA when requested after an update. The project is
+currently available as a custom repository and is not listed in the general catalog.
 
-Der zusätzliche manuelle Matter-Code wird bei jedem Laden aus dem gültigen `MT:`-
-Original abgeleitet. Er ist kein zweiter gespeicherter Code und kann nicht unabhängig
-bearbeitet werden. JSON, CSV und HA-Backups behalten den Original-QR; nach Import
-oder Wiederherstellung wird die Ziffernfolge ab `0.1.0b4` erneut daraus berechnet.
-Die Ableitung öffnet kein Pairingfenster und erneuert keinen abgelaufenen Freigabecode.
+For manual installation, download the
+[release source ZIP](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b6),
+copy `custom_components/setup_code_manager` to the same path in your HA configuration,
+restart and add the integration under **Settings → Devices & services**.
+Back up HA before testing.
 
-JSON ist das vollständige Inventarformat. CSV hat ein festes versioniertes Schema
-mit einer Zeile pro Code, einschließlich codefreier Geräte. Ein reversibles
-Apostroph-Präfix schützt Tabellenzellen vor Formelinterpretation und erhält führende
-Nullen; beim externen Bearbeiten muss das Schema erhalten bleiben. Es gibt noch
-keine freie Spaltenzuordnung für beliebige CSV-Dateien. Import und Export sind auf
-16 MiB und 10.000 Inventareinträge begrenzt.
+**Privacy and limits:** Decoding runs locally, and images are neither uploaded
+nor stored. Live video needs HTTPS and camera permission. There is no OCR, and
+each device can hold one code per protocol. The integration does not pair devices.
+Exports contain setup codes in plain text, and the inventory has no additional
+encryption beyond your HA environment. Include the configuration folder in HA
+backups; an inventory export does not replace a full HA backup.
 
-Exporte enthalten Codes im Klartext. Bilder werden ausschließlich lokal verarbeitet
-und nicht gespeichert. Es gibt weder Analyseübertragung noch einen Cloud-Decoder.
-Die Integration fügt dem HA-Konfigurationsordner keine eigene Verschlüsselung hinzu.
+This is beta software. Automated and isolated HA runtime tests have passed;
+installation, restart and iPhone photo capture have also been checked. Physical
+iPhone live scanning, export/import on the target system and a full HA restore
+still need practical verification. See the [test record](docs/TESTING.de.md) and
+[report issues](https://github.com/durkadigital/setup-code-manager/issues) without
+including real setup codes or private data.
 
-[Sicherung, Wiederherstellung und HA-Backups](docs/BACKUP.de.md) beschreibt den Umfang.
-Ein echter vollständiger HA-Backup-/Restore-Lauf sowie die weiteren Kamera- und
-Gerätetests aus dem Abnahmeplan stehen noch aus.
+## Lizenz und Herkunft / License and credits
 
-## Entwicklung
-
-```sh
-python3.14 -m venv .venv
-.venv/bin/python -m pip install -r requirements-test.txt
-.venv/bin/python -m pytest -q
-.venv/bin/ruff check custom_components tests dev/smoke_ha.py
-.venv/bin/ruff format --check custom_components tests dev/smoke_ha.py
-node --test tests/*.test.mjs
-python3 -m http.server 8765 --bind 127.0.0.1
-```
-
-Die lokale Oberflächenvorschau liegt unter `http://127.0.0.1:8765/dev/`.
-Sie nutzt dieselbe Web-Komponente mit ausdrücklich gekennzeichneten Beispieldaten
-und einer simulierten HA-Verbindung. Ihr Zustand bleibt nur im Arbeitsspeicher.
-Sie belegt keinen Test in einer laufenden HA-Installation.
-
-Zusätzlich lässt sich der echte HTTP-/WebSocket-Lauf lokal wiederholen:
-
-```sh
-.venv/bin/python -m pip install -r requirements-runtime-test.txt
-.venv/bin/python dev/smoke_ha.py
-```
-
-Dieser optionale Test startet HA Core ausschließlich auf `127.0.0.1` mit einer
-temporären Konfiguration und synthetischen Benutzern. Er prüft Einrichtung,
-Adminschutz, Web-Dateien, Speichern, Export und Datenerhalt beim Neuladen, beendet
-anschließend HA und entfernt die Testdaten. Das Ergebnis liegt unter
-`dist/runtime-smoke.json`. Details und Grenzen stehen im [Teststand](docs/TESTING.de.md).
-
-## Projekt und Herkunft
-
-- [Projektstand](PROJECT.md)
-- [Funktionskonzept](docs/CONCEPT.de.md) und [Bildschirmkonzept](docs/SCREENS.de.md)
-- [Visuelle Entwürfe](docs/design/README.md)
-- [Technische Herkunft](docs/PROVENANCE.md) und [Originaldokumentation](docs/UPSTREAM_README.md)
-
-Dieses Projekt baut auf [PhantomPhoton/Setup-Codes](https://github.com/PhantomPhoton/Setup-Codes)
-auf. Originalhistorie, Urheberhinweise und [MIT-Lizenz](LICENSE) bleiben erhalten.
-Der mitgelieferte QR-Decoder [jsQR](custom_components/setup_code_manager/www/vendor/README.md)
-steht unter Apache-2.0; die zugehörige Lizenz liegt im selben Verzeichnis.
-
-Echte Setup-Codes, HA-Konfigurationen und private Exporte gehören nicht in dieses
-Repository. Entwicklungsbeispiele verwenden ausschließlich synthetische Daten.
+Dieses Projekt basiert auf [PhantomPhoton/Setup-Codes](https://github.com/PhantomPhoton/Setup-Codes).
+Originalhistorie, Urheberhinweise und die [MIT-Lizenz](LICENSE) bleiben erhalten.
+Der lokale QR-Decoder [jsQR](custom_components/setup_code_manager/www/vendor/README.md)
+steht unter Apache-2.0; seine Lizenz wird mitgeliefert. Weitere Angaben stehen in
+der [Herkunftsdokumentation](docs/PROVENANCE.md).

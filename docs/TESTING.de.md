@@ -1,19 +1,39 @@
 # Teststand und praktische Abnahme
 
-Dieser Teststand beschreibt die lokale Cachekorrektur **0.1.0b5**, die zuletzt
-installierte [0.1.0b4](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b4)
-und die getrennt dokumentierten früheren Betas. Installation
-und praktische Abnahme von `0.1.0b5` stehen noch aus; der Standardbranch `main`
-bleibt bei `0.1.0b1`. Automatisierte Prüfungen verwenden synthetische Daten. Zusätzlich
-wurden ein reales QR-Foto lokal und die Fotoaufnahme auf dem Ziel-iPhone geprüft.
+Dieser Teststand beschreibt die geprüfte Cachekorrektur **0.1.0b5** und die
+getrennt dokumentierten früheren Betas. **0.1.0b5** wurde auf HA Core 2026.11.1
+installiert und nach einem Home-Assistant-Neustart geprüft. Die nachfolgende
+**0.1.0b6** entfernt den dauerhaften Übernahmehinweis aus der Übersicht und
+überarbeitet die öffentliche Dokumentation. Die nachstehenden Testzahlen sind
+ausdrücklich den jeweiligen Versionen zugeordnet.
+Automatisierte Prüfungen verwenden synthetische Daten. Zusätzlich wurden ein
+reales QR-Foto lokal und die Fotoaufnahme auf dem Ziel-iPhone geprüft.
 Private Fotos und Codeinhalte werden nicht im Repository dokumentiert.
 Die vollständige praktische Abnahme steht aus.
+
+## Abschlussprüfung von 0.1.0b6 am 10. November 2026
+
+- **299 Python-Tests** und **82 JavaScript-Tests** bestanden.
+- Ruff-Code- und Formatprüfung bestanden.
+- Isolierter HA-Core-Lauf: **13 Prüfungen** bestanden, alle sieben
+  versionsbezogenen Web-Dateien erreichbar, keine Fehler der Integration.
+- Lokale Browserprüfung mit Beispieldaten: Übersicht → Details → Schließen →
+  Importieren. Der Übernahmehinweis und **Originaldaten prüfen** erscheinen
+  weder in der Übersicht noch im Importdialog.
+- Desktopansicht und mobile Darstellung bei **390 × 844 Pixeln** geprüft.
+  Die maskierten Original- und manuellen Matter-Codes bleiben getrennt sichtbar;
+  der Detailbereich lässt sich schließen. Keine Anwendungsfehler in der Konsole.
+- Aktuelle öffentliche [Screenshots](screenshots/) enthalten ausschließlich
+  Beispieldaten; keine privaten Geräte oder realen Einrichtungscodes.
+
+Diese Prüfungen sind kein physischer iPhone-Kameratest und kein vollständiger
+HA-Backup-Restore. Installation im Zielsystem wird getrennt dokumentiert.
 
 ## Lokaler Entwicklungsstand 0.1.0b5
 
 Nach der Installation von Beta 4 konnte Safari ein neues Panel mit einer älteren,
 unversioniert importierten Übersetzungsdatei kombinieren. Dadurch erschien etwa
-`codeStored` statt **Gespeichert**. Ein frischer Abruf der Übersetzungsdatei
+`codeStored` statt **Code gespeichert**. Ein frischer Abruf der Übersetzungsdatei
 enthielt den korrekten Text; die gespeicherten Codes waren weiterhin vorhanden.
 
 Beta 5 verwendet einen gemeinsamen versionsbezogenen Pfad für das Panel und
@@ -30,8 +50,8 @@ bei erneutem Einrichten. Ruff, Format- und Whitespace-Prüfung bestanden.
 Der isolierte Lauf mit echtem HA Core bestand 13 Prüfungen. Alle sieben Assets
 antworteten unter der tatsächlich registrierten Versionsbasis mit HTTP 200;
 Adminschutz, Speichern, Export und Neuladen bestanden, ohne Integrationsfehler.
-Im Zielsystem ist nach dem Update besonders zu prüfen, dass die neuen Texte auch
-in einer zuvor verwendeten Safari-/Companion-Sitzung korrekt erscheinen.
+Die anschließende Installation und Oberflächenprüfung im Zielsystem ist unten
+gesondert dokumentiert.
 [Versionshinweise](releases/0.1.0b5.md).
 
 ## Lokale Prüfung von 0.1.0b4 am 10. November 2026
@@ -41,7 +61,7 @@ Die Beta ergänzt drei zusammengehörige Funktionen:
 - Zu gültigen gespeicherten `MT:`-QRs automatisch den manuellen Matter-Code mit
   11 oder 21 Ziffern ableiten. Original und Zifferncode bleiben unabhängig maskiert,
   anzeigbar und kopierbar; auch ältere Einträge benötigen keinen erneuten Scan.
-- Vorhandene Codes grün als **Gespeichert** kennzeichnen. Der separate
+- Vorhandene Codes grün als **Code gespeichert** kennzeichnen. Der separate
   Online-/Offline-Status beschreibt weiterhin die Erreichbarkeit des HA-Geräts.
 - Namen und Räume vorhandener verknüpfter HA-Geräte automatisch übernehmen,
   einschließlich späterer Umbenennungen und Raumänderungen. Diese Felder sind im
@@ -162,7 +182,7 @@ Besonders abgedeckt:
 - Adminschutz aller API-Befehle; Fehler und Änderungsereignisse ohne Codeinhalte.
 - QR-Pixeldaten einschließlich invertierter/gedrehter Bilder; Kamera-/Fotoressourcen nach Abbruch freigeben.
 
-Die lokalen Befehle stehen in der [README](../README.md). Auf GitHub sind auch die
+Die lokalen Befehle stehen im [Entwicklungsleitfaden](../PROJECT.md#lokale-entwicklung). Auf GitHub sind auch die
 [Tests](https://github.com/durkadigital/setup-code-manager/actions/runs/42364597060)
 und [Hassfest](https://github.com/durkadigital/setup-code-manager/actions/runs/42364597053)
 für den veröffentlichten Entwicklungsstand `d9a70e6` bestanden. Die HACS-Validierung
@@ -192,7 +212,7 @@ etwa Kamera, Sprachassistent und Analytics; deren Startfehler stehen ausdrückli
 im Bericht. Unsere Integration sowie HTTP, Frontend und API wurden erfolgreich geladen.
 Dieser Test ist keine HA-OS-, Smartphone-, Geräte- oder vollständige Restore-Abnahme.
 
-Installation und Aufruf stehen in der README unter Entwicklung. Der zusätzliche
+Installation und Aufruf stehen im [Entwicklungsleitfaden](../PROJECT.md#isolierter-ha-lauf). Der zusätzliche
 Frontend-Download gehört nur zur optionalen `requirements-runtime-test.txt`, nicht
 zur normalen Unit-Testumgebung.
 
@@ -210,8 +230,8 @@ Am 7. November 2026 auf **HA OS 18.4 / Core 2026.11.0 / Frontend 20261028.4** ge
 - Marketplace-Installation von **Setup Code Manager 0.1.0b1**, Autor `durkadigital`,
   Installationsverzeichnis `setup_code_manager`.
 - Einrichtung über den Config-Flow erfolgreich; das Administrator-Panel zeigte
-  fünf automatisch erkannte, verknüpfte Geräte.
-- Ein echter HA-Neustart wurde abgeschlossen; danach waren weiterhin fünf Einträge sichtbar.
+  automatisch erkannte, verknüpfte Geräte.
+- Ein echter HA-Neustart wurde abgeschlossen; danach waren die Einträge weiterhin sichtbar.
 - Geräteerfassung, manuelle Eingabe und HA-Geräteauswahl mit dem voreingestellten
   Filter **Ohne Matter-Code** wurden ohne Speichern geprüft.
 
@@ -234,7 +254,7 @@ und der Livevideo-Test über HTTPS bleiben offen.
 
 Am 7. November 2026 wurde die veröffentlichte **0.1.0b3** über den Marketplace auf
 dem Zielsystem installiert und Home Assistant neu gestartet. Danach zeigte das
-Panel weiterhin **fünf Geräte, davon zwei mit gespeicherten Codes**.
+Panel weiterhin die vorhandenen Geräte einschließlich gespeicherter Codes.
 
 Die tatsächliche HA-Oberfläche wurde anschließend in Safari/WebKit mit einer
 Darstellungsgröße von **390 × 844 Pixeln** geprüft: Detailinhalt bis zum Ende
@@ -244,13 +264,13 @@ des korrigierten Layouts auf dem physischen iPhone steht noch aus.
 
 ## Installation und Prüfung von 0.1.0b4 auf Home Assistant OS
 
-Am 10. November 2026 wurde vor dem Update eine **verschlüsselte lokale HA-Sicherung
-mit 40,21 MB** erstellt. Anschließend wurde **0.1.0b4** auf dem Zielsystem mit
+Am 10. November 2026 wurde vor dem Update eine **verschlüsselte lokale HA-Sicherung**
+erstellt. Anschließend wurde **0.1.0b4** auf dem Zielsystem mit
 **HA Core 2026.11.1** installiert und Home Assistant neu gestartet. Danach waren
-**neun Geräte, davon sechs mit gespeicherten Codes**, sichtbar. Die verknüpften
+die vorhandenen Geräte einschließlich gespeicherter Codes sichtbar. Die verknüpften
 Geräte zeigten die übernommenen aktuellen Namen und Räume aus Home Assistant.
 
-In Safari erschien jedoch `codeStored` statt **Gespeichert**: Das neue Panel
+In Safari erschien jedoch `codeStored` statt **Code gespeichert**: Das neue Panel
 verwendete noch eine zwischengespeicherte ältere Übersetzungsdatei. Ein frischer
 Abruf dieser Datei enthielt die korrekten Texte. Dieser Befund begrenzt die
 Oberflächenabnahme von Beta 4 und ist Anlass für die Cachekorrektur in Beta 5.
@@ -260,14 +280,26 @@ keinen vollständigen Restore und ersetzt nicht die übrigen noch offenen
 Funktions- und Smartphone-Tests. Private Adressen, Gerätenamen, Codewerte und
 Sicherungsgeheimnisse werden nicht dokumentiert.
 
+## Installation und Prüfung von 0.1.0b5 auf Home Assistant OS
+
+Am 10. November 2026 wurde **0.1.0b5** auf HA Core **2026.11.1** installiert und
+Home Assistant anschließend neu gestartet. In der laufenden Installation wurden
+die korrekten Übersetzungen einschließlich **Code gespeichert**, der zusätzliche
+maskierte manuelle Matter-Code, schreibgeschützte verknüpfte Namen und Räume,
+bearbeitbare Notizen und die grüne Speicherkennzeichnung geprüft. Vorhandene
+Inventareinträge und Codes blieben erhalten.
+
+HTTPS-Zugang, Anmeldung und die Auswahl der Scanmethoden wurden ebenfalls
+geprüft. Diese Browserprüfung belegt noch keine Livekamera-Aufnahme auf dem
+physischen iPhone. Export/Import im Zielsystem, vollständige Wiederherstellung und
+die übrigen unten aufgeführten Fälle bleiben offen.
+
 ## Direktscan und HTTP
 
-Am 10. November 2026 wurde auf dem Zielsystem ein bereits aktiver Nabu-Casa-
-Fernzugang gefunden. Dessen gültige HTTPS-Adresse führte bis zur HA-Anmeldeseite.
-Eine Anmeldung in dieser HTTPS-Sitzung sowie die Livekamera-Abnahme auf dem
-physischen iPhone stehen noch aus. Dafür ist keine zusätzliche Tailscale- oder
-Netzwerkkonfiguration erforderlich. Der Test muss über die HTTPS-Adresse erfolgen;
-eine weiterhin verwendete interne HTTP-Adresse stellt keinen sicheren Browserkontext her.
+Für die Livekamera muss Home Assistant tatsächlich über HTTPS geöffnet sein.
+Eine weiterhin verwendete interne HTTP-Adresse stellt keinen sicheren
+Browserkontext her. HTTPS-Anmeldung und Scannerauswahl sind im Zielsystem geprüft;
+die Livekamera-Abnahme auf dem physischen iPhone steht noch aus.
 
 Die vorhandene Browser-Livekamera benötigt HTTPS bzw. einen sicheren Kontext.
 Über HTTP bleibt die bestätigte System-Fotoaufnahme verfügbar. Im geprüften
@@ -285,7 +317,7 @@ nicht geändert.
 
 1. Zugriff als normaler Benutzer im Zielsystem prüfen: Es darf kein Zugriff auf
    die Codes bestehen. Für weitere Installationen gilt die
-   [Testinstallation](../README.md#testinstallation); die ursprüngliche Integration
+   [Installationsanleitung](INSTALLATION.de.md); die ursprüngliche Integration
    und ihre Daten bleiben erhalten.
 2. Geräte mit Matter und HomeKit sowie ein offline geschaltetes Gerät vorbereiten.
    Bei Matter-Erfassung muss ein Gerät mit gespeichertem HomeKit-Code und fehlendem
@@ -309,14 +341,15 @@ nicht geändert.
 6. JSON und CSV exportieren, unverändert importieren und erneut importieren.
    Anschließend bewusst einen Konflikt erzeugen, vorhandene Daten behalten bzw.
    ausdrücklich ersetzen. Einen Import in einer frischen Installation getrennt prüfen.
-7. Die alte Integration parallel installieren und die lokale Übernahme prüfen.
-   Unklare Mehrfachzuordnungen bleiben getrennt, Codes müssen vollständig erhalten bleiben.
+7. Die alte Integration gegebenenfalls parallel installiert lassen und prüfen,
+   dass ihre Daten unverändert bleiben. Seit 0.1.0b6 sind ihre Übernahmehinweise
+   und -Buttons aus der Oberfläche entfernt.
 8. Vollständigen HA-Backup-/Restore-Test gemäß [Sicherungsanleitung](BACKUP.de.md)
    durchführen. Die Ergebnisse der Vorabversion entscheiden über weitere Betas
    und eine spätere stabile Veröffentlichung.
 
-Offen sind Export/Import im Zielsystem, ein vollständiger HA-Restore, die
-Cachekorrektur aus `0.1.0b5` und die weiteren Smartphone-/Companion-App-Abnahmen
+Offen sind Export/Import im Zielsystem, ein vollständiger HA-Restore und die
+weiteren Smartphone-/Companion-App-Abnahmen
 einschließlich HTTPS-Livekamera, Detail-Layout und verbleibender Funktionen aus
 `0.1.0b4` auf dem physischen iPhone. Ein automatisierter
 Decoder-Test belegt die Erkennung der Testbilder, nicht die Qualität aller realen
