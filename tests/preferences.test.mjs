@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  MAX_SAVED_VIEWS, VIEW_SETTINGS_DEFAULTS, loadViews, normalizeViews,
-  preferenceKey, sanitizeViewSettings, saveViews,
+  MAX_SAVED_VIEWS, VIEW_SETTINGS_DEFAULTS, loadViewPreferences, loadViews, normalizeViews,
+  preferenceKey, sanitizeViewSettings, saveViewPreferences, saveViews,
 } from '../custom_components/setup_code_manager/www/preferences.js';
 
 function memoryStorage() {
@@ -103,4 +103,87 @@ test('long HA floor and label IDs survive saved view round trips while room name
   assert.equal(saved.floor, choices.floor);
   assert.equal(saved.label, choices.label);
   assert.equal(saved.room, '');
+});
+
+test('legacy version 1 saved views remain readable and can acquire a default without migration', () => {
+  const storage = memoryStorage(), key = preferenceKey('instance','user');
+  const views = [view('home', { name:'Home' }), view('work', { name:'Work' })];
+  const legacy = JSON.stringify({ version:1, views });
+  storage.setItem(key,legacy);
+  assert.deepEqual(loadViewPreferences(storage,'instance','user'), { views:normalizeViews(views), defaultViewId:'' });
+  assert.equal(storage.getItem(key),legacy);
+  assert.equal(saveViewPreferences(storage,'instance','user',{ views, defaultViewId:'home' }), true);
+  assert.deepEqual(JSON.parse(storage.getItem(key)), { version:1, views:normalizeViews(views), defaultViewId:'home' });
+  assert.deepEqual(loadViews(storage,'instance','user'), normalizeViews(views));
+});
+
+test('default view selection is scoped to its HA instance and user and can be explicitly cleared', () => {
+  const storage = memoryStorage(), views = [view('home'), view('work')];
+  assert.equal(saveViewPreferences(storage,'instance-a','user-a',{ views, defaultViewId:'home' }), true);
+  assert.equal(saveViewPreferences(storage,'instance-a','user-b',{ views, defaultViewId:'work' }), true);
+  assert.equal(saveViewPreferences(storage,'instance-b','user-a',{ views, defaultViewId:'work' }), true);
+  assert.equal(loadViewPreferences(storage,'instance-a','user-a').defaultViewId, 'home');
+  assert.equal(loadViewPreferences(storage,'instance-a','user-b').defaultViewId, 'work');
+  assert.equal(loadViewPreferences(storage,'instance-b','user-a').defaultViewId, 'work');
+  assert.deepEqual(loadViewPreferences(storage,'instance-b','user-b'), { views:[], defaultViewId:'' });
+  assert.equal(saveViewPreferences(storage,'instance-a','user-a',{ views, defaultViewId:'' }), true);
+  assert.deepEqual(loadViewPreferences(storage,'instance-a','user-a'), { views:normalizeViews(views), defaultViewId:'' });
+  assert.equal(loadViewPreferences(storage,'instance-a','user-b').defaultViewId, 'work');
+  assert.equal(Object.hasOwn(JSON.parse(storage.getItem(preferenceKey('instance-a','user-a'))),'defaultViewId'), false);
+});
+
+test('the compatibility save function preserves the default when its view is added, renamed or updated', () => {
+  const storage = memoryStorage(), views = [view('home'), view('work')];
+  assert.equal(saveViewPreferences(storage,'instance','user',{ views, defaultViewId:'home' }), true);
+  const changed = [view('extra'), view('home', { name:'My renamed home', settings:{ group:'room', sort:'updated-desc' } }), view('work')];
+  assert.equal(saveViews(storage,'instance','user',changed), true);
+  assert.deepEqual(loadViewPreferences(storage,'instance','user'), { views:normalizeViews(changed), defaultViewId:'home' });
+  assert.equal(saveViews(storage,'instance','user',changed.filter(item => item.id !== 'work')), true);
+  assert.equal(loadViewPreferences(storage,'instance','user').defaultViewId, 'home');
+  assert.equal(saveViews(storage,'instance','user',changed.filter(item => item.id !== 'home')), true);
+  assert.deepEqual(loadViewPreferences(storage,'instance','user'), { views:normalizeViews(changed.filter(item => item.id !== 'home')), defaultViewId:'' });
+});
+
+test('default IDs must refer to a retained valid view on both read and write', () => {
+  const storage = memoryStorage(), key = preferenceKey('instance','user');
+  const views = [view('home'), view('bad id'), view('blank',{ name:'' })];
+  for (const defaultViewId of [undefined,null,true,42,'','Home','home ','bad id','blank','missing','x'.repeat(81),{ id:'home' }]) {
+    assert.equal(saveViewPreferences(storage,'instance','user',{ views, defaultViewId }), true);
+    assert.deepEqual(loadViewPreferences(storage,'instance','user'), { views:normalizeViews(views), defaultViewId:'' });
+    storage.setItem(key,JSON.stringify({ version:1, views, defaultViewId }));
+    assert.deepEqual(loadViewPreferences(storage,'instance','user'), { views:normalizeViews(views), defaultViewId:'' });
+  }
+  const overLimit = Array.from({ length:MAX_SAVED_VIEWS + 1 }, (_, i) => view(`id-${i}`));
+  assert.equal(saveViewPreferences(storage,'instance','user',{ views:overLimit, defaultViewId:`id-${MAX_SAVED_VIEWS}` }), true);
+  assert.equal(loadViewPreferences(storage,'instance','user').defaultViewId, '');
+  assert.equal(saveViewPreferences(storage,'instance','user',{ views, defaultViewId:'home' }), true);
+  assert.equal(saveViews(storage,'instance','user',[view('home',{ name:'' })]), true);
+  assert.deepEqual(loadViewPreferences(storage,'instance','user'), { views:[], defaultViewId:'' });
+});
+
+test('default view persistence keeps the existing privacy whitelist', () => {
+  const storage = memoryStorage(), views = [view('home', { query:'SYNTHETIC-SECRET-QUERY', codes:['MT:SECRET'], settings:{ query:'MT:SECRET', notes:'private note', group:'room' } })];
+  assert.equal(saveViewPreferences(storage,'instance','user',{ views, defaultViewId:'home', query:'SECRET', codes:['SECRET'], notes:'private note', defaultView:view('private') }), true);
+  const stored = storage.getItem(preferenceKey('instance','user'));
+  assert.doesNotMatch(stored, /SECRET|private|codes|query|notes/);
+  assert.deepEqual(JSON.parse(stored), { version:1, views:normalizeViews(views), defaultViewId:'home' });
+});
+
+test('default preferences recover safely from corrupt or unavailable storage and invalid scopes', () => {
+  const empty = { views:[], defaultViewId:'' }, storage = memoryStorage(), key = preferenceKey('instance','user');
+  for (const raw of [null,'{broken','null','[]','{"version":2,"views":[],"defaultViewId":"home"}','{"version":1,"views":{},"defaultViewId":"home"}','x'.repeat(100001)]) {
+    storage.setItem(key,raw);
+    assert.deepEqual(loadViewPreferences(storage,'instance','user'), empty);
+    assert.equal(storage.getItem(key),raw);
+  }
+  for (const broken of [undefined,{}, { getItem() { throw new Error('denied'); }, setItem() { throw new Error('quota'); } }, { get getItem() { throw new Error('denied getter'); }, get setItem() { throw new Error('denied getter'); } }]) {
+    assert.deepEqual(loadViewPreferences(broken,'instance','user'), empty);
+    assert.equal(saveViewPreferences(broken,'instance','user',{ views:[view('home')], defaultViewId:'home' }), false);
+  }
+  const untouched = { getItem() { assert.fail('invalid scope must not read'); }, setItem() { assert.fail('invalid scope must not write'); } };
+  assert.deepEqual(loadViewPreferences(untouched,'','user'), empty);
+  assert.equal(saveViewPreferences(untouched,'instance','',{ views:[view('home')], defaultViewId:'home' }), false);
+  assert.equal(saveViews(untouched,'','user',[view('home')]), false);
+  assert.equal(saveViewPreferences(storage,'instance','user',null), true);
+  assert.deepEqual(loadViewPreferences(storage,'instance','user'), empty);
 });

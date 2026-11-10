@@ -1,13 +1,49 @@
 # Teststand und praktische Abnahme
 
 Dieser Teststand trennt lokale Prüfungen von Veröffentlichung und praktischer
-Abnahme. **0.1.0b8** ergänzt das Filter-Dropdown und die Inventarwerkzeuge.
+Abnahme. **0.1.0b9** korrigiert das Öffnen nativer Filterauswahlen und ergänzt
+Standardansichten. **0.1.0b8** ergänzt das Filter-Dropdown und die Inventarwerkzeuge.
 **0.1.0b7** wurde auf HA Core 2026.11.1 installiert und nach Neustart mit
 Codesuche, kombinierten Raum-/Protokoll-/Statusfiltern und Datenerhalt geprüft.
 Automatisierte Prüfungen verwenden synthetische Daten. Zusätzlich wurden ein
 reales QR-Foto lokal und die Fotoaufnahme auf dem Ziel-iPhone geprüft.
 Private Fotos und Codeinhalte werden nicht im Repository dokumentiert.
 Die vollständige praktische Abnahme steht aus.
+
+## Lokale Abschlussprüfung von 0.1.0b9 am 10. November 2026
+
+- **319 Python-Tests** und **218 JavaScript-Tests** bestanden, einschließlich
+  der Sprachwechsel- und ARIA-Prüfung.
+- Isolierter Lauf mit echtem **HA Core 2026.11.0**: **14 Prüfungen** bestanden;
+  alle **10** versionierten Web-Dateien antworteten mit HTTP 200. Keine
+  Integrationsfehler. SHA-256 der getesteten Integrationsdateien:
+  `d4cbbc0b585383ffd4be38801cf295ffbf4f9f061dffba38ae03bf5bf383f1f8`.
+- Browserprüfung mit synthetischen Daten am Desktop und bei **390 × 844 Pixeln**
+  bestanden: Standard setzen und aufheben, nach Neuladen automatisch anwenden
+  sowie zwischenzeitlich geänderte Filter bei einer HA-Aktualisierung behalten.
+  Mobile Filter öffnen ohne Select-Autofokus; Gerätedetails schließen erreichbar;
+  kein horizontales Überlaufen und keine Anwendungsfehler in der Browserkonsole.
+
+Die automatisierten Paneltests prüfen, dass **Filter** kein natives Auswahlfeld
+automatisch fokussiert. Raum- und Etagenänderungen aktualisieren die Treffer,
+während Filterbereich und Auswahlfelder als dieselben DOM-Elemente verbunden
+bleiben. Der Desktop-Popover bleibt dabei ohne erneutes Schließen und Öffnen offen.
+Dies sichert die gemeldeten mobilen Fehler ab: sofort geöffnete Raumauswahl und
+erneutes Öffnen nach einer Auswahl. Ein Nachtest auf dem physischen iPhone bleibt
+eine getrennte Abnahme.
+
+Tests für Standardansichten prüfen das erstmalige Anwenden nach Auflösung von
+HA-Instanz und Konto, den Erhalt vorübergehender Filter bei späteren HA-Updates
+sowie den Wechsel zu einem anderen Konto. Setzen, Aufheben und Löschen eines
+Standards sind einschließlich Speicherfehlern geprüft. Vorhandene Ansichten im
+bisherigen Speicherformat bleiben erhalten; der Standard gilt browserlokal pro
+HA-Instanz und Konto. Suchtexte und Codeinhalte werden weiterhin nicht gespeichert.
+
+Das Inventar- und Austauschformat bleibt unverändert. Die bisherige v1-Hülle für
+Ansichten erhält nur eine optionale Standard-ID; bestehende Ansichten bleiben
+ohne Migration erhalten. Dieser Stand ist noch nicht veröffentlicht und nicht im
+Zielsystem installiert. Die Abnahme auf dem physischen iPhone steht weiterhin aus.
+[Versionshinweise](releases/0.1.0b9.md) · [Bedienung](USAGE.de.md).
 
 ## Lokale Abschlussprüfung von 0.1.0b8 am 10. November 2026
 

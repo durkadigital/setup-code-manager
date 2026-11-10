@@ -3,7 +3,7 @@ import { translator, protocolNames } from './i18n.js';
 import { icon, deviceIcon } from './icons.js';
 import { startScanner, scanImage } from './scanner.js';
 import { filterRecords, availableRooms, availableFloors, availableLabels, groupRecordsByRoom, SORTS } from './filters.js';
-import { sanitizeViewSettings, preferenceKey, loadViews, saveViews, MAX_SAVED_VIEWS } from './preferences.js';
+import { sanitizeViewSettings, preferenceKey, loadViewPreferences, saveViewPreferences, saveViews, MAX_SAVED_VIEWS } from './preferences.js';
 import { printDeviceCards, MAX_PRINT_RECORDS } from './print.js';
 import './qr.js';
 
@@ -29,7 +29,7 @@ class SetupCodeManagerPanel extends HTMLElement {
     this._devices = []; this._haDevices = []; this._revision = 0;
     this._tab = 'all'; this._query = ''; this._protocol = ''; this._codeStatusFilter = 'all'; this._room = '';
     this._floor = ''; this._label = ''; this._sort = 'name-asc'; this._group = 'none'; this._filtersOpen = false; this._advancedFiltersOpen = false; this._viewsOpen = false;
-    this._savedViews = []; this._activeViewId = ''; this._viewName = ''; this._preferenceScope = null;
+    this._savedViews = []; this._defaultViewId = ''; this._activeViewId = ''; this._viewName = ''; this._preferenceScope = null;
     this._selection = new Set(); this._selecting = false; this._collapsedGroups = new Set();
     this._revealed = new Set(); this._revealedManual = new Set(); this._formRevealed = new Set(); this._compareRevealed = new Set();
     this._loading = true; this._busy = false; this._loadSequence = 0; this._dialogGeneration = 0;
@@ -43,7 +43,12 @@ class SetupCodeManagerPanel extends HTMLElement {
     this.shadowRoot.addEventListener('keydown', event => { if (event.key !== 'Escape' || this._modal) return; if (this._filtersOpen) { event.preventDefault(); event.stopPropagation(); this._closeFilters(true); } else if (this._selectedId) { event.preventDefault(); event.stopPropagation(); this._closeDetails(); } });
     this.shadowRoot.addEventListener('toggle',event => { const id = event.target.id; if (this.shadowRoot.getElementById?.(id) !== event.target) return; if (id === 'advanced-filters') this._advancedFiltersOpen = event.target.open; if (id === 'saved-views') this._viewsOpen = event.target.open; if (this._filtersOpen && (id === 'advanced-filters' || id === 'saved-views')) this._positionFilterPanel(); },true);
     this._outsideFilters = event => { if (!this._filtersOpen || this._inlineFilters()) return; const path = event.composedPath?.() || []; if (!path.includes(this.shadowRoot.getElementById?.('filter-panel')) && !path.includes(this.shadowRoot.querySelector('[data-action="toggle-filters"]'))) this._closeFilters(); };
-    this._resizeFilters = () => { if (this._filtersOpen) this._renderMain(); };
+    this._resizeFilters = () => { if (this._filtersOpen) this._setupFilterPanel(); };
+    this.shadowRoot.addEventListener('focusout',event => {
+      if (event.target.localName === 'select' && event.target.closest?.('#inventory-filters')) {
+        queueMicrotask(() => { if (this._connected && this._filterControlsPending) this._syncFilterControls(); });
+      }
+    });
   }
   set hass(value) {
     const languageChanged = this._hass?.language !== value?.language;
@@ -150,7 +155,9 @@ class SetupCodeManagerPanel extends HTMLElement {
     const key = preferenceKey(this._instance, this._hass?.user?.id);
     if (key === this._preferenceScope) return;
     this._preferenceScope = key; this._activeViewId = ''; this._viewName = '';
-    this._savedViews = loadViews(this._viewStorage(), this._instance, this._hass?.user?.id);
+    const preferences = loadViewPreferences(this._viewStorage(), this._instance, this._hass?.user?.id);
+    this._savedViews = preferences.views; this._defaultViewId = preferences.defaultViewId;
+    if (key && this._defaultViewId) this._applyView(this._defaultViewId, false);
   }
   _saveView() {
     const name = this._viewName.trim();
@@ -163,20 +170,30 @@ class SetupCodeManagerPanel extends HTMLElement {
     if (!saveViews(this._viewStorage(),this._instance,this._hass?.user?.id,views)) { this._toast(this._t('viewStorageFailed')); return; }
     this._savedViews = views; this._activeViewId = view.id; this._renderMain(); this.shadowRoot.querySelector('[data-field="view-name"]')?.focus({preventScroll:true}); this._toast(this._t('viewSaved'));
   }
-  _applyView(id) {
+  _applyView(id, render = true) {
     const view = this._savedViews.find(item => item.id === id);
     if (!view) return;
     const s = sanitizeViewSettings(view.settings);
     this._tab = s.tab; this._protocol = s.protocol; this._codeStatusFilter = s.codeStatus; this._room = s.room; this._floor = s.floor; this._label = s.label; this._sort = s.sort; this._group = s.group;
     this._query = ''; this._activeViewId = view.id; this._viewName = view.name; this._advancedFiltersOpen = !!(s.floor || s.label || s.group !== 'none');
-    this._selection.clear(); this._selectedId = null; this._collapsedGroups.clear(); this._renderMain();
+    this._selection.clear(); this._selectedId = null; this._collapsedGroups.clear(); if (render) this._renderMain();
   }
   _deleteView() {
     const view = this._savedViews.find(item => item.id === this._activeViewId);
     if (!view || !window.confirm(this._t('deleteViewConfirm',{name:view.name}))) return;
     const views = this._savedViews.filter(item => item.id !== view.id);
     if (!saveViews(this._viewStorage(),this._instance,this._hass?.user?.id,views)) { this._toast(this._t('viewStorageFailed')); return; }
-    this._savedViews = views; this._activeViewId = ''; this._viewName = ''; this._renderMain(); this.shadowRoot.querySelector('[data-field="saved-view"]')?.focus({preventScroll:true});
+    this._savedViews = views; if (this._defaultViewId === view.id) this._defaultViewId = '';
+    this._activeViewId = ''; this._viewName = ''; this._renderMain();
+  }
+  _setDefaultView() {
+    if (!this._savedViews.some(view => view.id === this._activeViewId)) return;
+    this._persistDefaultView(this._activeViewId);
+  }
+  _clearDefaultView() { this._persistDefaultView(''); }
+  _persistDefaultView(id) {
+    if (!saveViewPreferences(this._viewStorage(),this._instance,this._hass?.user?.id,{views:this._savedViews,defaultViewId:id})) { this._toast(this._t('viewStorageFailed')); return; }
+    this._defaultViewId = id; this._renderMain(); this._toast(this._t(id ? 'defaultViewSaved' : 'defaultViewCleared'));
   }
   _visibleDevices() {
     return filterRecords(this._devices, {...this._viewSettings(),query:this._query}, this._hass?.language);
@@ -219,28 +236,84 @@ class SetupCodeManagerPanel extends HTMLElement {
         </div><p class="small muted">${esc(t('haFilterHint'))}</p></details>
       </div>
       <details id="saved-views" class="filter-disclosure saved-views" ${this._viewsOpen ? 'open' : ''}><summary>${esc(t('savedViews'))}${this._savedViews.length ? ` (${this._savedViews.length})` : ''}</summary><div class="saved-view-fields">
-        ${this._selectField('saved-view',t('savedViews'),[['',t('chooseView')],...this._savedViews.map(view => [view.id,view.name])],this._activeViewId)}
+        ${this._selectField('saved-view',t('savedViews'),[['',t('chooseView')],...this._savedViews.map(view => [view.id,view.id === this._defaultViewId ? `${view.name} (${t('defaultView')})` : view.name])],this._activeViewId)}
         <label class="filter-field"><span>${esc(t('viewName'))}</span><input data-field="view-name" data-focus="view-name" maxlength="80" value="${esc(this._viewName)}" autocomplete="off"></label>
-        <div class="view-actions">${this._button('save-view',t(this._savedViews.some(view => view.id === this._activeViewId && view.name === this._viewName.trim()) ? 'updateView' : 'saveView'),'','text')}${this._activeViewId ? this._button('delete-view',t('deleteView'),'','text') : ''}</div>
+        <div id="view-actions" class="view-actions">${this._button('save-view',t(this._savedViews.some(view => view.id === this._activeViewId && view.name === this._viewName.trim()) ? 'updateView' : 'saveView'),'','text')}${this._activeViewId ? this._button('delete-view',t('deleteView'),'','text') : ''}${this._activeViewId && this._activeViewId !== this._defaultViewId ? this._button('set-default-view',t('setDefaultView'),'','text') : ''}${this._defaultViewId ? this._button('clear-default-view',t('clearDefaultView'),'','text') : ''}</div>
+        <p id="default-view-status" class="small muted" ${this._defaultViewId ? '' : 'hidden'}>${esc(t('defaultViewHint',{name:this._savedViews.find(view => view.id === this._defaultViewId)?.name || ''}))}</p>
         <p class="small muted">${esc(t('viewStorageHint'))}</p>
       </div></details>
       <div class="filter-footer">${this._button('reset-filters',t('resetFilters'),'','text')}${this._button('close-filters',t('done'),'','text')}</div>
     </section>`;
-    return `<div class="filters">
+    return `<div id="inventory-filters" class="filters">
       <div class="search-row"><label class="search">${icon('search')}<input type="search" data-field="search" data-focus="search" placeholder="${esc(t('search'))}" aria-label="${esc(t('search'))}" value="${esc(this._query)}" autocomplete="off" spellcheck="false"></label>
       <button type="button" class="button filter-toggle" data-action="toggle-filters" data-focus="filter-toggle" aria-expanded="${this._filtersOpen}" aria-controls="filter-panel">${icon('filter')}${esc(t('filters'))}${chips.length ? `<span class="count">${chips.length}</span>` : ''}</button>
       ${this._selectField('sort-filter',t('sortBy'),SORTS.map(sort => [sort,t(`sort_${sort}`)]),this._sort)}</div>
       ${panel}
-      ${chips.length ? `<div class="active-filters" aria-label="${esc(t('activeFilters'))}">${chips.map(([key,label]) => `<button type="button" class="chip active" data-action="remove-filter" data-filter="${key}" aria-label="${esc(t('removeFilter',{name:label}))}">${esc(label)}${icon('close')}</button>`).join('')}</div>` : ''}
-      <div class="list-actions"><span class="filter-count" role="status" aria-live="polite">${esc(t('filteredCount',{count,total}))}</span><div>${this._hasFilters() ? this._button('reset-filters',t('resetFilters'),'','text') : ''}${this._button('toggle-selection',t(this._selecting ? 'finishSelection' : 'selectRecords'),'','text')}</div></div>
+      <div id="active-filter-chips" class="active-filters" ${chips.length ? '' : 'hidden'} aria-label="${esc(t('activeFilters'))}">${chips.map(([key,label]) => `<button type="button" class="chip active" data-action="remove-filter" data-filter="${key}" aria-label="${esc(t('removeFilter',{name:label}))}">${esc(label)}${icon('close')}</button>`).join('')}</div>
+      <div id="list-action-summary" class="list-actions"><span class="filter-count" role="status" aria-live="polite">${esc(t('filteredCount',{count,total}))}</span><div>${this._hasFilters() ? this._button('reset-filters',t('resetFilters'),'','text') : ''}${this._button('toggle-selection',t(this._selecting ? 'finishSelection' : 'selectRecords'),'','text')}</div></div>
     </div>`;
+  }
+  _syncFilterControls() {
+    const root = this.shadowRoot.getElementById('inventory-filters');
+    if (!root) return;
+    const desired = document.createElement('div');
+    desired.innerHTML = this._renderFilters(this._visibleDevices().length, this._devices.filter(record => this._tab === 'archive' ? record.archived : !record.archived && (this._tab === 'all' || (this._tab === 'linked') === isLinked(record))).length);
+    root.querySelector('#filter-panel').setAttribute('aria-label',this._t('filters'));
+    this._filterControlsPending = false;
+    for (const el of root.querySelectorAll('[data-field]')) {
+      const next = desired.querySelector(`[data-field="${el.dataset.field}"]`);
+      if (!next) continue;
+      const activeSelect = el.localName === 'select' && this.shadowRoot.activeElement === el;
+      if (el.localName === 'select') {
+        const signature = node => JSON.stringify([...node.options].map(option => [option.value,option.label,option.disabled]));
+        if (signature(el) !== signature(next)) {
+          if (activeSelect) this._filterControlsPending = true;
+          else el.innerHTML = next.innerHTML;
+        }
+      }
+      if (el.value !== next.value) {
+        if (activeSelect) this._filterControlsPending = true;
+        else el.value = next.value;
+      }
+      for (const attr of ['aria-label','placeholder']) {
+        const value = next.getAttribute(attr);
+        if (value !== null) el.setAttribute(attr,value);
+      }
+      const label = el.parentElement?.querySelector('span');
+      const nextLabel = next.parentElement?.querySelector('span');
+      if (label && nextLabel) label.textContent = nextLabel.textContent;
+    }
+    for (const selector of ['#active-filter-chips','#list-action-summary','#view-actions','#default-view-status','.filter-panel-heading','.filter-footer','#advanced-filters > summary','#saved-views > summary','#advanced-filters p','#saved-views .saved-view-fields > p:last-child']) {
+      const el = root.querySelector(selector), next = desired.querySelector(selector);
+      if (!el || !next) continue;
+      el.innerHTML = next.innerHTML; el.hidden = next.hidden;
+      const label = next.getAttribute('aria-label'); if (label !== null) el.setAttribute('aria-label',label);
+    }
+    for (const [id,open] of [['advanced-filters',this._advancedFiltersOpen],['saved-views',this._viewsOpen]]) {
+      const disclosure = root.querySelector(`#${id}`); if (disclosure && disclosure.open !== open) disclosure.open = open;
+    }
+    const trigger = root.querySelector('[data-action="toggle-filters"]');
+    const nextTrigger = desired.querySelector('[data-action="toggle-filters"]');
+    trigger.innerHTML = nextTrigger.innerHTML; trigger.setAttribute('aria-expanded',String(this._filtersOpen));
   }
   _setupFilterPanel() {
     const panel = this.shadowRoot.getElementById?.('filter-panel');
-    if (!panel || !this._filtersOpen || this._inlineFilters()) return;
+    if (!panel) return;
+    const inline = this._inlineFilters();
+    panel.classList.toggle('inline',inline); panel.classList.toggle('floating',!inline);
+    if (inline) {
+      try { panel.hidePopover?.(); } catch { /* Already inline. */ }
+      panel.removeAttribute('popover'); panel.style.cssText = '';
+    } else panel.setAttribute('popover','auto');
+    panel.hidden = !this._filtersOpen;
+    if (!this._filtersOpen || inline) return;
+    // Keep the same top-layer element while results and options are updated.
+    if (this._boundFilterPanel !== panel) {
+      this._boundFilterPanel = panel;
+      panel.addEventListener('toggle',event => { if (event.newState === 'closed' && !panel.matches(':popover-open') && !this._inlineFilters() && this.shadowRoot.getElementById?.('filter-panel') === panel && this._filtersOpen) this._closeFilters(); });
+    }
     try { if (panel.showPopover && !panel.matches(':popover-open')) panel.showPopover(); } catch { /* Older clients use the same fixed panel. */ }
     this._positionFilterPanel();
-    panel.addEventListener('toggle',event => { if (event.newState === 'closed' && this.shadowRoot.getElementById?.('filter-panel') === panel && this._filtersOpen) this._closeFilters(); });
   }
   _positionFilterPanel() {
     const panel = this.shadowRoot.getElementById?.('filter-panel');
@@ -336,7 +409,21 @@ class SetupCodeManagerPanel extends HTMLElement {
       const title = filtered ? 'noResults' : this._tab === 'archive' ? 'emptyArchive' : this._tab === 'linked' ? 'emptyLinked' : this._tab === 'unlinked' && this._devices.length ? 'emptyUnlinked' : 'emptyTitle';
       content = `<div class="empty">${icon(this._tab === 'archive' ? 'archive' : 'key')}<h2>${esc(t(title))}</h2><p>${esc(t(filtered ? 'noResultsBody' : this._tab === 'archive' ? 'emptyArchiveBody' : 'emptyBody'))}</p>${filtered ? '' : this._button('add',t('add'),'plus','primary')}</div>`;
     } else content = this._renderDeviceTable(rows,selected);
-    this.shadowRoot.getElementById('app').innerHTML = `<div class="app"><div class="workspace ${selected ? 'has-details' : ''}"><main class="main"><header class="topbar"><button type="button" class="icon-button menu-button" data-action="ha-menu" aria-label="${esc(t('menu'))}">${icon('menu')}</button><h1>Setup Code Manager</h1><span class="refresh-action">${this._iconButton('refresh', t('refresh'), 'refresh')}</span><span class="mobile-toolbar">${this._iconButton('menu', t('menu'), 'more')}</span></header><div class="toolbar">${this._button('add',t('add'),'plus','primary')}${this._button('import',t('import'),'download','secondary-action')}${this._button('export',t('export'),'upload','secondary-action')}${this._button('capture-start',t('captureAction'),'camera','secondary-action')}</div><nav class="tabs" aria-label="${esc(t('device'))}">${['all','linked','unlinked','archive'].map(tab => `<button type="button" class="tab ${this._tab === tab ? 'active' : ''}" data-action="tab" data-tab="${tab}" aria-pressed="${this._tab === tab}">${esc(t(tab))}<span class="count">${counts[tab]}</span></button>`).join('')}</nav><p class="caption">${esc(t(this._tab === 'archive' ? 'archiveHint' : 'activeHint'))}</p>${this._renderFilters(rows.length, counts[this._tab])}${this._loadError ? this._notice(this._loadError, 'error', `<div>${this._button('refresh',t('retry'),'refresh','text')}</div>`) : ''}${this._renderSelectionBar(rows)}${content}</main>${selected ? this._renderDetails(selected) : ''}</div></div>`;
+    const markup = `<div class="app"><div id="inventory-workspace" class="workspace ${selected ? 'has-details' : ''}"><main class="main"><header id="inventory-header" class="topbar"><button type="button" class="icon-button menu-button" data-action="ha-menu" aria-label="${esc(t('menu'))}">${icon('menu')}</button><h1>Setup Code Manager</h1><span class="refresh-action">${this._iconButton('refresh', t('refresh'), 'refresh')}</span><span class="mobile-toolbar">${this._iconButton('menu', t('menu'), 'more')}</span></header><div id="inventory-toolbar" class="toolbar">${this._button('add',t('add'),'plus','primary')}${this._button('import',t('import'),'download','secondary-action')}${this._button('export',t('export'),'upload','secondary-action')}${this._button('capture-start',t('captureAction'),'camera','secondary-action')}</div><nav id="inventory-tabs" class="tabs" aria-label="${esc(t('device'))}">${['all','linked','unlinked','archive'].map(tab => `<button type="button" class="tab ${this._tab === tab ? 'active' : ''}" data-action="tab" data-tab="${tab}" aria-pressed="${this._tab === tab}">${esc(t(tab))}<span class="count">${counts[tab]}</span></button>`).join('')}</nav><p id="inventory-caption" class="caption">${esc(t(this._tab === 'archive' ? 'archiveHint' : 'activeHint'))}</p>${this._renderFilters(rows.length, counts[this._tab])}<div id="inventory-error">${this._loadError ? this._notice(this._loadError, 'error', `<div>${this._button('refresh',t('retry'),'refresh','text')}</div>`) : ''}</div><div id="inventory-selection">${this._renderSelectionBar(rows)}</div><div id="inventory-results">${content}</div></main>${selected ? this._renderDetails(selected) : '<aside id="inventory-details" class="details" hidden></aside>'}</div></div>`;
+    const incremental = !!this.shadowRoot.getElementById('inventory-results');
+    if (incremental) {
+      const update = (id,html) => { this.shadowRoot.getElementById(id).innerHTML = html; };
+      const desired = document.createElement('div');
+      desired.innerHTML = markup;
+      for (const id of ['inventory-header','inventory-toolbar','inventory-tabs','inventory-caption','inventory-error','inventory-selection','inventory-results']) update(id,desired.querySelector(`#${id}`).innerHTML);
+      this.shadowRoot.getElementById('inventory-tabs').setAttribute('aria-label',t('device'));
+      this.shadowRoot.getElementById('inventory-workspace').classList.toggle('has-details',!!selected);
+      const detail = this.shadowRoot.getElementById('inventory-details');
+      const nextDetail = desired.querySelector('#inventory-details');
+      detail.hidden = !selected; detail.innerHTML = nextDetail.innerHTML;
+      if (selected) detail.setAttribute('aria-label',selected.name); else detail.removeAttribute('aria-label');
+      this._syncFilterControls();
+    } else this.shadowRoot.getElementById('app').innerHTML = markup;
     this._renderedListKey = listKey;
     const main = this.shadowRoot.querySelector('.main');
     if (main) main.scrollTop = this._listScrollTop || 0;
@@ -345,7 +432,10 @@ class SetupCodeManagerPanel extends HTMLElement {
       const scrollBody = this.shadowRoot.querySelector('.detail-body') || this.shadowRoot.querySelector('.details');
       if (scrollBody) scrollBody.scrollTop = detailScroll;
     }
-    this._setupFilterPanel(); this._restoreFocus(snapshot);
+    this._setupFilterPanel();
+    // Retained controls already own focus, including while iOS dismisses its picker.
+    const filterFocus = ['search','filter-toggle','sort-filter','room-filter','protocol-filter','code-status-filter','floor-filter','label-filter','group-filter','saved-view','view-name'];
+    if (!incremental || !filterFocus.includes(snapshot?.key)) this._restoreFocus(snapshot);
   }
   _closeDetails() {
     const id = this._selectedId;
@@ -357,7 +447,7 @@ class SetupCodeManagerPanel extends HTMLElement {
   _renderDetails(record) {
     const t = this._t;
     const links = record.links || [];
-    return `<aside class="details" aria-label="${esc(record.name)}"><div class="detail-heading"><div><h2 title="${esc(record.name)}">${esc(record.name)}</h2></div>${this._iconButton('close-details',t('close'),'close')}</div><div class="detail-body"><div class="detail-meta">${this._codeStatus(record)}<p>${esc([record.location,record.model].filter(Boolean).join(' · ') || record.manufacturer || '')}</p>${record.archived ? `<span class="badge">${icon('archive')}${esc(t('archived'))}</span>` : ''}</div><div class="detail-actions">${this._button('edit',t('edit'),'','text',`data-id="${esc(record.id)}"`)}${this._button('print-record',t('printCard'),'print','text',`data-id="${esc(record.id)}"`)}</div><section class="detail-section"><h3>Home Assistant</h3><div class="detail-status">${this._status(record)}</div>${links.some(link => link.active === false) ? `<p class="muted small" style="margin-top:12px">${esc(t('removedHint'))}</p>` : ''}${links.filter(link => link.active !== false).map(link => `<div class="link-item"><span class="small muted">${esc(link.name || record.name)}</span><a class="button" href="/config/devices/device/${encodeURIComponent(link.ha_device_id)}">${icon('external')}${esc(t('openDevice'))}</a></div>`).join('')}${this._button('edit-links',t(links.length ? 'changeLinks' : 'linkDevice'),'link','text',`data-id="${esc(record.id)}"`)}</section><section class="detail-section"><h3>${esc(t('setupCodes'))}</h3>${recordCodes(record).length ? recordCodes(record).map(code => this._renderCode(code)).join('') : `<p class="muted">${esc(t('noCode'))}</p>`}${this._button('edit-codes',t('addCode'),'plus','text',`data-id="${esc(record.id)}"`)}</section><section class="detail-section"><h3>${esc(t('note'))}</h3><p class="muted">${esc(record.notes || t('noNote'))}</p>${record.manufacturer || record.serial_number ? `<p class="small muted" style="margin-top:16px">${esc([record.manufacturer, record.serial_number].filter(Boolean).join(' · '))}</p>` : ''}</section><section class="detail-section detail-bottom">${this._button('archive',t(record.archived ? 'restore' : 'archiveAction'),record.archived ? 'restore' : 'archive','text',`data-id="${esc(record.id)}"`)}${this._button('delete',t('delete'),'trash','text danger',`data-id="${esc(record.id)}"`)}</section></div></aside>`;
+    return `<aside id="inventory-details" class="details" aria-label="${esc(record.name)}"><div class="detail-heading"><div><h2 title="${esc(record.name)}">${esc(record.name)}</h2></div>${this._iconButton('close-details',t('close'),'close')}</div><div class="detail-body"><div class="detail-meta">${this._codeStatus(record)}<p>${esc([record.location,record.model].filter(Boolean).join(' · ') || record.manufacturer || '')}</p>${record.archived ? `<span class="badge">${icon('archive')}${esc(t('archived'))}</span>` : ''}</div><div class="detail-actions">${this._button('edit',t('edit'),'','text',`data-id="${esc(record.id)}"`)}${this._button('print-record',t('printCard'),'print','text',`data-id="${esc(record.id)}"`)}</div><section class="detail-section"><h3>Home Assistant</h3><div class="detail-status">${this._status(record)}</div>${links.some(link => link.active === false) ? `<p class="muted small" style="margin-top:12px">${esc(t('removedHint'))}</p>` : ''}${links.filter(link => link.active !== false).map(link => `<div class="link-item"><span class="small muted">${esc(link.name || record.name)}</span><a class="button" href="/config/devices/device/${encodeURIComponent(link.ha_device_id)}">${icon('external')}${esc(t('openDevice'))}</a></div>`).join('')}${this._button('edit-links',t(links.length ? 'changeLinks' : 'linkDevice'),'link','text',`data-id="${esc(record.id)}"`)}</section><section class="detail-section"><h3>${esc(t('setupCodes'))}</h3>${recordCodes(record).length ? recordCodes(record).map(code => this._renderCode(code)).join('') : `<p class="muted">${esc(t('noCode'))}</p>`}${this._button('edit-codes',t('addCode'),'plus','text',`data-id="${esc(record.id)}"`)}</section><section class="detail-section"><h3>${esc(t('note'))}</h3><p class="muted">${esc(record.notes || t('noNote'))}</p>${record.manufacturer || record.serial_number ? `<p class="small muted" style="margin-top:16px">${esc([record.manufacturer, record.serial_number].filter(Boolean).join(' · '))}</p>` : ''}</section><section class="detail-section detail-bottom">${this._button('archive',t(record.archived ? 'restore' : 'archiveAction'),record.archived ? 'restore' : 'archive','text',`data-id="${esc(record.id)}"`)}${this._button('delete',t('delete'),'trash','text danger',`data-id="${esc(record.id)}"`)}</section></div></aside>`;
   }
   _manualValue(code) {
     return code?.protocol === 'matter' && code.value?.startsWith('MT:') && typeof code.manual_value === 'string' && /^(?:[0-9]{11}|[0-9]{21})$/.test(code.manual_value) ? code.manual_value : '';
@@ -835,12 +925,14 @@ class SetupCodeManagerPanel extends HTMLElement {
       else if (action === 'refresh') await this._refresh();
       else if (action === 'refresh-menu') { this._closeModal(true); await this._refresh(); }
       else if (action === 'tab') { this._closeFilters(); this._tab = button.dataset.tab; this._selectedId = null; this._selection.clear(); this._activeViewId = ''; this._renderMain(); }
-      else if (action === 'toggle-filters') { if (this._filtersOpen) this._closeFilters(true); else { this._filtersOpen = true; this._renderMain(); this.shadowRoot.querySelector('[data-field="room-filter"]')?.focus({preventScroll:true}); } }
+      else if (action === 'toggle-filters') { if (this._filtersOpen) this._closeFilters(true); else { this._filtersOpen = true; this.shadowRoot.querySelector('[data-action="toggle-filters"]')?.setAttribute('aria-expanded','true'); this._setupFilterPanel(); } }
       else if (action === 'close-filters') this._closeFilters(true);
       else if (action === 'reset-filters') this._resetFilters();
       else if (action === 'remove-filter') { const fields = {room:'_room',floor:'_floor',label:'_label',protocol:'_protocol',status:'_codeStatusFilter'}; const field = fields[button.dataset.filter]; if (field) { this[field] = field === '_codeStatusFilter' ? 'all' : ''; this._selection.clear(); this._renderMain(); this.shadowRoot.querySelector('[data-action="toggle-filters"]')?.focus({preventScroll:true}); } }
       else if (action === 'save-view') this._saveView();
       else if (action === 'delete-view') this._deleteView();
+      else if (action === 'set-default-view') this._setDefaultView();
+      else if (action === 'clear-default-view') this._clearDefaultView();
       else if (action === 'toggle-group') { const key = button.dataset.group; this._collapsedGroups.has(key) ? this._collapsedGroups.delete(key) : this._collapsedGroups.add(key); this._renderMain(); }
       else if (action === 'toggle-selection') { this._selecting = !this._selecting; this._selection.clear(); this._renderMain(); }
       else if (action === 'toggle-record') { this._selection.has(id) ? this._selection.delete(id) : this._selection.add(id); this._renderMain(); }

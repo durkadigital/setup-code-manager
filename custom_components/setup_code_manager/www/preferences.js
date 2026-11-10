@@ -49,23 +49,38 @@ export function preferenceKey(instanceId, userId) {
   catch { return null; }
 }
 
-export function loadViews(storage, instanceId, userId) {
-  const key = preferenceKey(instanceId, userId);
-  if (!key) return [];
-  try {
-    const raw = storage?.getItem(key);
-    if (typeof raw !== 'string' || raw.length > 100000) return [];
-    const envelope = JSON.parse(raw);
-    return envelope?.version === 1 ? normalizeViews(envelope.views) : [];
-  } catch { return []; }
+function normalizeViewPreferences(value) {
+  const input = object(value), views = normalizeViews(input.views), id = safeId(input.defaultViewId);
+  return { views, defaultViewId:views.some(view => view.id === id) ? id : '' };
 }
 
-export function saveViews(storage, instanceId, userId, views) {
+export function loadViewPreferences(storage, instanceId, userId) {
+  const key = preferenceKey(instanceId, userId);
+  if (!key) return { views:[], defaultViewId:'' };
+  try {
+    const raw = storage?.getItem(key);
+    if (typeof raw !== 'string' || raw.length > 100000) return { views:[], defaultViewId:'' };
+    const envelope = JSON.parse(raw);
+    return envelope?.version === 1 ? normalizeViewPreferences(envelope) : { views:[], defaultViewId:'' };
+  } catch { return { views:[], defaultViewId:'' }; }
+}
+
+export function saveViewPreferences(storage, instanceId, userId, preferences) {
   const key = preferenceKey(instanceId, userId);
   if (!key) return false;
   try {
     if (typeof storage?.setItem !== 'function') return false;
-    storage.setItem(key, JSON.stringify({ version:1, views:normalizeViews(views) }));
+    const { views, defaultViewId } = normalizeViewPreferences(preferences);
+    storage.setItem(key, JSON.stringify({ version:1, views, ...(defaultViewId ? { defaultViewId } : {}) }));
     return true;
   } catch { return false; }
+}
+
+export function loadViews(storage, instanceId, userId) {
+  return loadViewPreferences(storage, instanceId, userId).views;
+}
+
+export function saveViews(storage, instanceId, userId, views) {
+  const { defaultViewId } = loadViewPreferences(storage, instanceId, userId);
+  return saveViewPreferences(storage, instanceId, userId, { views, defaultViewId });
 }

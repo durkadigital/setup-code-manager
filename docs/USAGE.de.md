@@ -9,6 +9,8 @@ Bindestriche optional; führende Nullen bleiben erhalten.
 
 **Filter** öffnet die Auswahl für Raum, Protokoll und Codestatus. Die Liste reagiert
 sofort. Die Zahl am Button zählt aktive Filterbedingungen, nicht den Suchtext.
+Raum- oder Etagenauswahl öffnen sich erst beim Antippen des jeweiligen Felds.
+Nach einer Auswahl bleibt der Filterbereich offen, ohne die Auswahl erneut zu öffnen.
 Nach dem Schließen bleiben aktive Bedingungen sichtbar und einzeln entfernbar.
 **Filter zurücksetzen** leert Suche und Filter; Ansicht, Sortierung und Gruppierung
 bleiben erhalten.
@@ -45,8 +47,16 @@ speichern** wählen. Eine Ansicht merkt sich die gewählte Registerkarte, Filter
 Sortierung und Gruppierung. Suchbegriffe, Notizen, Codes und Inventarkopien werden
 nicht gespeichert. Beim Anwenden einer Ansicht wird die Suche geleert.
 
+Eine gespeicherte Ansicht auswählen und **Als Standard verwenden** wählen, damit
+sie beim Öffnen automatisch geladen wird. **Standard aufheben** entfernt nur diese
+Voreinstellung; die gespeicherte Ansicht bleibt erhalten. Automatische
+HA-Aktualisierungen überschreiben zwischenzeitlich geänderte Filter nicht.
+Bereits gespeicherte Ansichten bleiben erhalten und können direkt zum Standard
+gemacht werden. Beim Löschen der Standardansicht wird auch die Voreinstellung entfernt.
+
 Bis zu 20 Ansichten lassen sich speichern, aktualisieren und entfernen. Die
-Ansichten gelten für die HA-Instanz und das angemeldete HA-Konto in diesem Browser.
+Ansichten und ihr Standard gelten für die HA-Instanz und das angemeldete HA-Konto
+in diesem Browser.
 Ein anderer Browser oder eine andere HA-Adresse hat einen eigenen Browser-Speicher.
 Die Ansichten sind nicht Teil eines Inventarexports oder HA-Backups. Ein gesperrter
 Browser-Speicher verhindert nur das Speichern von Ansichten, nicht die Codepflege.
