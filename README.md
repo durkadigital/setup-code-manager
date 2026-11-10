@@ -7,7 +7,7 @@ Scanne einen QR-Code, wähle ein Foto oder gib den Code von Hand ein.
 Dein Inventar bleibt lokal in Home Assistant und auch ohne Geräteverknüpfung erhalten.
 
 [Installation](docs/INSTALLATION.de.md) ·
-[Vorabversion 0.1.0b6](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b6) ·
+[Vorabversion 0.1.0b7](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b7) ·
 [Sicherung](docs/BACKUP.de.md) ·
 [English](#english)
 
@@ -23,8 +23,9 @@ Dein Inventar bleibt lokal in Home Assistant und auch ohne Geräteverknüpfung e
   erkennen. Der QR-Decoder wird mitgeliefert; Bilder werden nicht hochgeladen.
 - **Matter-Codes wiederfinden:** Zu einem gespeicherten Matter-QR den manuellen
   Einrichtungscode automatisch ableiten, anzeigen und kopieren.
-- **Den Überblick behalten:** Geräte suchen, nach Protokoll oder fehlendem Code
-  filtern und mit Home Assistant verknüpfen. **Code gespeichert** zeigt den Codebestand;
+- **Den Überblick behalten:** Nach Gerätenamen, Notizen, QR-Inhalten oder manuellen
+  Codes suchen. Raum, Protokoll und Codestatus gemeinsam filtern und Geräte mit
+  Home Assistant verknüpfen. **Code gespeichert** zeigt den Codebestand;
   die Erreichbarkeit des Geräts wird separat angezeigt.
 - **Passende Angaben sehen:** Namen und Räume verknüpfter Geräte aus Home Assistant
   automatisch übernehmen. Eigene Notizen bleiben bearbeitbar; unabhängige Einträge
@@ -42,13 +43,13 @@ und seine Daten ist auf Home-Assistant-Administratoren beschränkt.
 
 Setup Code Manager ist eine **benutzerdefinierte Integration** für
 **Home Assistant 2026.11 oder neuer**. Installiere sie über den Marketplace oder
-kopiere sie manuell in `custom_components`. Aktuell ist **0.1.0b6 eine Vorabversion**;
+kopiere sie manuell in `custom_components`. Aktuell ist **0.1.0b7 eine Vorabversion**;
 das Projekt ist noch nicht im allgemeinen Marketplace-Katalog gelistet.
 
 1. **Einstellungen → Marketplace** öffnen und **Add from link** / **Über Link hinzufügen** wählen.
 2. `https://github.com/durkadigital/setup-code-manager` hinzufügen und GitHub verbinden,
    wenn Home Assistant dazu auffordert.
-3. In den Repository-Details **Vorabversionen** einschließen und **0.1.0b6** auswählen.
+3. In den Repository-Details **Vorabversionen** einschließen und **0.1.0b7** auswählen.
 4. Installieren und den Einrichtungsdialog abschließen. Bei einem Update den
    angeforderten Home-Assistant-Neustart ausführen.
 5. **Setup Code Manager** in der Seitenleiste öffnen.
@@ -95,22 +96,24 @@ Entferne echte Einrichtungscodes und persönliche Daten aus Screenshots und Anh�
 integration for Matter, HomeKit and Z-Wave codes, with a German and English interface.
 It provides a separate device inventory, local QR scanning from a camera or photo,
 manual code entry, search, archive, notes and JSON/CSV import with a preview.
-Saved Matter QR codes also provide the derived manual setup code.
+Saved Matter QR codes also provide the derived manual setup code. Search includes
+notes, QR payloads and manual codes, with spaces and hyphens ignored for numeric
+codes. Combine room, protocol and code-status filters, including missing codes.
 
 Link an entry to Home Assistant to keep its device name and area up to date.
 These fields are read-only while linked; notes remain editable. Removing an HA
 device keeps the inventory entry and its codes. Panel and API access require an
 administrator account.
 
-**Install the current pre-release, 0.1.0b6:** In **HA 2026.11+**, open **Settings →
+**Install the current pre-release, 0.1.0b7:** In **HA 2026.11+**, open **Settings →
 Marketplace → Add from link**, add
 `https://github.com/durkadigital/setup-code-manager`, connect GitHub when prompted,
-enable **Pre-releases** in the repository details and select **0.1.0b6**. Install
+enable **Pre-releases** in the repository details and select **0.1.0b7**. Install
 and complete setup; restart HA when requested after an update. The project is
 currently available as a custom repository and is not listed in the general catalog.
 
 For manual installation, download the
-[release source ZIP](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b6),
+[release source ZIP](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b7),
 copy `custom_components/setup_code_manager` to the same path in your HA configuration,
 restart and add the integration under **Settings → Devices & services**.
 Back up HA before testing.

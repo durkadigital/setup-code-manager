@@ -162,6 +162,7 @@ async def smoke(directory: str, results: dict, evidence: RuntimeEvidence) -> Non
                 assets = [
                     "panel.js",
                     "panel.css",
+                    "filters.js",
                     "scanner.js",
                     "i18n.js",
                     "icons.js",

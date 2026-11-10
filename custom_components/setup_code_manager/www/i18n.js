@@ -2,7 +2,8 @@
 const messages = {
   all: ['Alle', 'All'], linked: ['Verknüpft', 'Linked'], unlinked: ['Nicht verknüpft', 'Not linked'], archive: ['Archiv', 'Archive'],
   add: ['Gerät erfassen', 'Add record'], import: ['Importieren', 'Import'], export: ['Exportieren', 'Export'],
-  search: ['Geräte suchen …', 'Search devices…'], allProtocols: ['Alle Protokolle', 'All protocols'], protocol: ['Protokoll', 'Protocol'], missingOnly: ['Code fehlt', 'Missing code'],
+  search: ['Name, Code oder Notiz suchen …', 'Search name, code, or note…'], allProtocols: ['Alle Protokolle', 'All protocols'], protocol: ['Protokoll', 'Protocol'], missingOnly: ['Code fehlt', 'Missing code'],
+  room: ['Raum', 'Room'], allRooms: ['Alle Räume', 'All rooms'], withoutRoom: ['Ohne Raum', 'No room'], codeStatus: ['Codestatus', 'Code status'], allCodes: ['Alle Codes', 'All codes'], codePresent: ['Code vorhanden', 'Code present'], filteredCount: ['{count} von {total} Geräten', '{count} of {total} devices'],
   activeHint: ['Geräte ohne Archiv', 'Devices outside the archive'], archiveHint: ['Archivierte Geräte und ihre Codes bleiben gespeichert.', 'Archived devices and their codes are kept.'],
   codeStored: ['Code gespeichert', 'Code saved'], haIdentity: ['Angaben aus Home Assistant', 'Details from Home Assistant'], haIdentityHint: ['Name und Raum werden aus Home Assistant übernommen. Änderungen nimmst du dort am Gerät vor.', 'Name and area come from Home Assistant. Change them on the device in Home Assistant.'], noArea: ['Kein Raum zugewiesen', 'No area assigned'],
   device: ['Gerät', 'Device'], location: ['Standort', 'Location'], codes: ['Codes', 'Codes'], stored: ['Gespeichert', 'Saved'], noCode: ['Code fehlt', 'Missing code'],

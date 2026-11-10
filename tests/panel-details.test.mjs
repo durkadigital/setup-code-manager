@@ -202,7 +202,8 @@ for (const [name, change] of [
   ['tab', panel => click(panel, 'tab', { tab: 'unlinked' })],
   ['search', panel => panel._onInput({ target: { dataset: { field: 'search' }, value: 'device b' } })],
   ['protocol', panel => panel._onChange({ target: { dataset: { field: 'protocol-filter' }, value: 'homekit' } })],
-  ['missing-code filter', panel => panel._onChange({ target: { dataset: { field: 'missing' }, checked: true } })],
+  ['code status', panel => panel._onChange({ target: { dataset: { field: 'code-status-filter' }, value: 'missing' } })],
+  ['room', panel => panel._onChange({ target: { dataset: { field: 'room-filter' }, value: 'room:Test location' } })],
 ]) {
   test(`changing ${name} resets the list to its top`, async () => {
     const { panel, state } = fixture();
@@ -215,3 +216,50 @@ for (const [name, change] of [
     assert.equal(state.main.scrollTop, 96);
   });
 }
+
+
+test('notes and manual Matter codes filter the panel through its search input', () => {
+  const { panel } = fixture();
+  panel._devices[0].notes = 'Spare label in blue drawer';
+  panel._devices[0].codes = [{ protocol:'matter', value:'MT:Y.K9042C00KA0648G00', manual_value:'03497011233' }];
+  for (const query of ['blue drawer', 'mt:y.k9042', '0349-701-1233']) {
+    panel._onInput({ target:{ dataset:{ field:'search' }, value:query } });
+    assert.deepEqual(panel._visibleDevices().map(item => item.id), ['a']);
+  }
+});
+
+test('room, protocol and code status compose, and reset restores the current tab', async () => {
+  const { panel, state } = fixture();
+  panel._tab = 'unlinked';
+  panel._devices[0].codes = [];
+  panel._devices[1].location = 'Other room';
+  for (const [field, value] of [['room-filter','room:Test location'],['protocol-filter','matter'],['code-status-filter','missing']]) {
+    panel._onChange({ target:{ dataset:{ field }, value } });
+  }
+  assert.deepEqual(panel._visibleDevices().map(item => item.id), ['a']);
+  assert.match(state.html, /1 of 2 devices/);
+  assert.match(state.html, /value="room:Test location" selected/);
+  assert.match(state.html, /value="missing" selected/);
+  panel._query = 'no match';
+  panel._renderMain();
+  assert.match(state.html, /No matching devices/);
+  await click(panel, 'reset-filters');
+  assert.equal(panel._query, '');
+  assert.equal(panel._room, '');
+  assert.equal(panel._protocol, '');
+  assert.equal(panel._codeStatusFilter, 'all');
+  assert.equal(panel._tab, 'unlinked');
+  assert.equal(state.focused, 'search');
+  assert.deepEqual(panel._visibleDevices().map(item => item.id), ['a','b']);
+  assert.doesNotMatch(state.html, /filter-summary/);
+});
+
+test('room options escape labels and preserve a selected room across a registry move', () => {
+  const { panel } = fixture();
+  panel._devices[0].location = 'Kids "room" <upstairs>';
+  panel._room = 'room:Former room';
+  const html = panel._renderFilters(0, 2);
+  assert.match(html, /value="room:Kids &quot;room&quot; &lt;upstairs&gt;"/);
+  assert.match(html, /value="room:Former room" selected/);
+  assert.doesNotMatch(html, /<upstairs>/);
+});

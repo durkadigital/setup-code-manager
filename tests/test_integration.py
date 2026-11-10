@@ -174,6 +174,7 @@ async def test_nested_module_and_css_urls_change_when_only_a_translation_changes
         assert set(before) == {
             "panel.js",
             "panel.css",
+            "filters.js",
             "i18n.js",
             "icons.js",
             "scanner.js",

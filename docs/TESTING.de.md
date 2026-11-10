@@ -1,15 +1,33 @@
 # Teststand und praktische Abnahme
 
-Dieser Teststand beschreibt die geprüfte Cachekorrektur **0.1.0b5** und die
-getrennt dokumentierten früheren Betas. **0.1.0b5** wurde auf HA Core 2026.11.1
-installiert und nach einem Home-Assistant-Neustart geprüft. Die nachfolgende
-**0.1.0b6** entfernt den dauerhaften Übernahmehinweis aus der Übersicht und
-überarbeitet die öffentliche Dokumentation. Die nachstehenden Testzahlen sind
-ausdrücklich den jeweiligen Versionen zugeordnet.
+Dieser Teststand trennt die lokalen Prüfungen der jeweiligen Betas von der
+praktischen Abnahme im Zielsystem. **0.1.0b7** ergänzt die Codesuche, Notizsuche
+und kombinierbare Filter. **0.1.0b6** wurde zuvor auf HA Core 2026.11.1 installiert,
+Home Assistant neu gestartet und die bereinigte Geräteübersicht geprüft.
 Automatisierte Prüfungen verwenden synthetische Daten. Zusätzlich wurden ein
 reales QR-Foto lokal und die Fotoaufnahme auf dem Ziel-iPhone geprüft.
 Private Fotos und Codeinhalte werden nicht im Repository dokumentiert.
 Die vollständige praktische Abnahme steht aus.
+
+## Abschlussprüfung von 0.1.0b7 am 10. November 2026
+
+- **299 Python-Tests** und **104 JavaScript-Tests** bestanden, einschließlich
+  22 neuer Prüfungen für Such- und Filterlogik, Panelanbindung und Fokus.
+- Ruff-Code-, Format- und Whitespace-Prüfung bestanden.
+- Browserprüfung mit synthetischen Daten: Notizsuche, wörtliche `MT:`-Suche und
+  Suche des abgeleiteten manuellen Codes mit Leerzeichen; kombinierte Auswahl
+  **Wohnzimmer + Matter + Code fehlt / Code vorhanden** und Zurücksetzen.
+- Desktop und **390 × 844 Pixel** mit simuliertem iPhone-Sicherheitsabstand:
+  alle Filter bedienbar, Auswahlfelder mindestens 44 px hoch, kein horizontales
+  Überlaufen. Details öffnen und schließen; Zurücksetzen fokussiert die Suche.
+- Isolierter echter HA-Core-Lauf: **13 Prüfungen** bestanden, alle acht
+  versionsbezogenen Web-Dateien mit HTTP 200 erreichbar, keine Integrationsfehler.
+  Einrichtung, Adminschutz, Speichern, Export und Neuladen bestanden.
+- Versionsbezogene Einbindung der neuen Datei `filters.js` einschließlich
+  Cacheinvalidierung ist durch die Integrationstests abgedeckt.
+
+Diese Browserprüfung verwendet die lokale Vorschau. Installation und Abnahme
+im Zielsystem werden getrennt dokumentiert.
 
 ## Abschlussprüfung von 0.1.0b6 am 10. November 2026
 

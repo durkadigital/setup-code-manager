@@ -2,6 +2,7 @@
 import { translator, protocolNames } from './i18n.js';
 import { icon, deviceIcon } from './icons.js';
 import { startScanner, scanImage } from './scanner.js';
+import { filterRecords, availableRooms } from './filters.js';
 import './qr.js';
 
 const DOMAIN = 'setup_code_manager';
@@ -24,7 +25,7 @@ class SetupCodeManagerPanel extends HTMLElement {
     this.shadowRoot.innerHTML = `<link rel="stylesheet" href="${cssURL}"><div id="app"></div><div id="modal-root"></div><div id="toast-root" aria-live="polite" role="status"></div>`;
     this._t = translator('en');
     this._devices = []; this._haDevices = []; this._revision = 0;
-    this._tab = 'all'; this._query = ''; this._protocol = ''; this._missing = false;
+    this._tab = 'all'; this._query = ''; this._protocol = ''; this._codeStatusFilter = 'all'; this._room = '';
     this._revealed = new Set(); this._revealedManual = new Set(); this._formRevealed = new Set(); this._compareRevealed = new Set();
     this._loading = true; this._busy = false; this._loadSequence = 0; this._dialogGeneration = 0;
     this._onClick = this._onClick.bind(this);
@@ -121,15 +122,26 @@ class SetupCodeManagerPanel extends HTMLElement {
     if (typeof snapshot.start === 'number') { try { el.setSelectionRange(snapshot.start, snapshot.end); } catch { /* Select controls have no selection range. */ } }
   }
   _visibleDevices() {
-    const query = this._query.trim().toLocaleLowerCase();
-    return this._devices.filter(record => {
-      if (this._tab === 'archive' ? !record.archived : record.archived) return false;
-      if (this._tab === 'linked' && !isLinked(record)) return false;
-      if (this._tab === 'unlinked' && isLinked(record)) return false;
-      if (this._protocol && !this._missing && !displayProtocols(record).includes(this._protocol)) return false;
-      if (this._missing && hasCode(record, this._protocol)) return false;
-      return !query || [record.name, record.location, record.manufacturer, record.model, record.serial_number].join(' ').toLocaleLowerCase().includes(query);
-    }).sort((a,b) => (a.name || '').localeCompare(b.name || '', this._hass?.language));
+    return filterRecords(this._devices, {
+      tab:this._tab, query:this._query, protocol:this._protocol,
+      codeStatus:this._codeStatusFilter, room:this._room,
+    }, this._hass?.language);
+  }
+  _hasFilters() { return !!(this._query.trim() || this._protocol || this._room || this._codeStatusFilter !== 'all'); }
+  _renderFilters(count, total) {
+    const t = this._t;
+    const rooms = availableRooms(this._devices, this._hass?.language);
+    // Keep a selected room visible if HA moves its last device during a refresh.
+    if (this._room.startsWith('room:') && !rooms.includes(this._room.slice(5))) rooms.push(this._room.slice(5));
+    return `<div class="filters">
+      <label class="search">${icon('search')}<input type="search" data-field="search" data-focus="search" placeholder="${esc(t('search'))}" aria-label="${esc(t('search'))}" value="${esc(this._query)}" autocomplete="off" spellcheck="false"></label>
+      <div class="filter-options">
+        <label class="filter-field room-filter"><span>${esc(t('room'))}</span><select data-field="room-filter" data-focus="room-filter"><option value="">${esc(t('allRooms'))}</option><option value="unassigned" ${this._room === 'unassigned' ? 'selected' : ''}>${esc(t('withoutRoom'))}</option>${rooms.map(room => `<option value="room:${esc(room)}" ${this._room === `room:${room}` ? 'selected' : ''}>${esc(room)}</option>`).join('')}</select></label>
+        <label class="filter-field"><span>${esc(t('protocol'))}</span><select data-field="protocol-filter" data-focus="protocol-filter"><option value="">${esc(t('allProtocols'))}</option>${PROTOCOLS.map(p => `<option value="${p}" ${this._protocol === p ? 'selected' : ''}>${protocolNames[p]}</option>`).join('')}</select></label>
+        <label class="filter-field"><span>${esc(t('codeStatus'))}</span><select data-field="code-status-filter" data-focus="code-status-filter"><option value="all">${esc(t('allCodes'))}</option><option value="has" ${this._codeStatusFilter === 'has' ? 'selected' : ''}>${esc(t('codePresent'))}</option><option value="missing" ${this._codeStatusFilter === 'missing' ? 'selected' : ''}>${esc(t('missingOnly'))}</option></select></label>
+      </div>
+      ${this._hasFilters() ? `<div class="filter-summary"><span role="status" aria-live="polite">${esc(t('filteredCount', { count, total }))}</span>${this._button('reset-filters',t('resetFilters'),'','text')}</div>` : ''}
+    </div>`;
   }
   _codeStatus(record) {
     const stored = hasCode(record);
@@ -160,7 +172,7 @@ class SetupCodeManagerPanel extends HTMLElement {
   }
   _renderMain() {
     const snapshot = this._focusSnapshot();
-    const listKey = JSON.stringify([this._tab,this._query,this._protocol,this._missing]);
+    const listKey = JSON.stringify([this._tab,this._query,this._protocol,this._codeStatusFilter,this._room]);
     const previousMain = this.shadowRoot.querySelector('.main');
     if (this._renderedListKey !== listKey) this._listScrollTop = 0;
     // Mobile details hide the list; its scrollTop then reads zero. Keep the last
@@ -177,11 +189,11 @@ class SetupCodeManagerPanel extends HTMLElement {
     if (this._hass?.user?.is_admin === false) content = this._notice(t('accessDenied'), 'error');
     else if (this._loading) content = `<div class="loading" role="status"><span class="spinner"></span>${esc(t('loading'))}</div>`;
     else if (!rows.length) {
-      const filtered = !!(this._query || this._protocol || this._missing);
+      const filtered = this._hasFilters();
       const title = filtered ? 'noResults' : this._tab === 'archive' ? 'emptyArchive' : this._tab === 'linked' ? 'emptyLinked' : this._tab === 'unlinked' && this._devices.length ? 'emptyUnlinked' : 'emptyTitle';
-      content = `<div class="empty">${icon(this._tab === 'archive' ? 'archive' : 'key')}<h2>${esc(t(title))}</h2><p>${esc(t(filtered ? 'noResultsBody' : this._tab === 'archive' ? 'emptyArchiveBody' : 'emptyBody'))}</p>${this._button(filtered ? 'reset-filters' : 'add', t(filtered ? 'resetFilters' : 'add'), filtered ? 'filter' : 'plus', filtered ? '' : 'primary')}</div>`;
+      content = `<div class="empty">${icon(this._tab === 'archive' ? 'archive' : 'key')}<h2>${esc(t(title))}</h2><p>${esc(t(filtered ? 'noResultsBody' : this._tab === 'archive' ? 'emptyArchiveBody' : 'emptyBody'))}</p>${filtered ? '' : this._button('add',t('add'),'plus','primary')}</div>`;
     } else content = `<div class="table-wrap"><table class="device-table"><colgroup><col class="device-col" style="width:34%"><col class="location-column" style="width:19%"><col class="codes-col" style="width:21%"><col class="status-col" style="width:26%"></colgroup><thead><tr><th scope="col">${esc(t('device'))}</th><th scope="col" class="location-column">${esc(t('location'))}</th><th scope="col">${esc(t('codes'))}</th><th scope="col">Home Assistant</th></tr></thead><tbody>${rows.map(record => `<tr data-action="select" data-id="${esc(record.id)}" class="${selected?.id === record.id ? 'selected' : ''}"><td><div class="device-name">${icon(deviceIcon(record))}<div><button type="button" class="row-open" data-action="select" data-id="${esc(record.id)}">${esc(record.name)}</button><div class="mobile-meta">${esc([record.location, displayProtocols(record).map(p => protocolNames[p]).join(', ')].filter(Boolean).join(' · '))}</div><div class="mobile-codes">${this._codeStatus(record)}${this._status(record)}</div></div></div></td><td class="location-column">${esc(record.location || '—')}</td><td><div class="code-summary">${esc(displayProtocols(record).map(p => protocolNames[p]).join(', ') || '—')}<div>${this._codeStatus(record)}</div></div></td><td>${this._status(record)}</td></tr>`).join('')}</tbody></table></div>`;
-    this.shadowRoot.getElementById('app').innerHTML = `<div class="app"><div class="workspace ${selected ? 'has-details' : ''}"><main class="main"><header class="topbar"><button type="button" class="icon-button menu-button" data-action="ha-menu" aria-label="${esc(t('menu'))}">${icon('menu')}</button><h1>Setup Code Manager</h1><span class="refresh-action">${this._iconButton('refresh', t('refresh'), 'refresh')}</span><span class="mobile-toolbar">${this._iconButton('menu', t('menu'), 'more')}</span></header><div class="toolbar">${this._button('add',t('add'),'plus','primary')}${this._button('import',t('import'),'download','secondary-action')}${this._button('export',t('export'),'upload','secondary-action')}</div><nav class="tabs" aria-label="${esc(t('device'))}">${['all','linked','unlinked','archive'].map(tab => `<button type="button" class="tab ${this._tab === tab ? 'active' : ''}" data-action="tab" data-tab="${tab}" aria-pressed="${this._tab === tab}">${esc(t(tab))}<span class="count">${counts[tab]}</span></button>`).join('')}</nav><p class="caption">${esc(t(this._tab === 'archive' ? 'archiveHint' : 'activeHint'))}</p><div class="filters"><label class="search">${icon('search')}<input type="search" data-field="search" data-focus="search" placeholder="${esc(t('search'))}" aria-label="${esc(t('search'))}" value="${esc(this._query)}"></label><select data-field="protocol-filter" aria-label="${esc(t('protocol'))}" data-focus="protocol-filter"><option value="">${esc(t('allProtocols'))}</option>${PROTOCOLS.map(p => `<option value="${p}" ${this._protocol === p ? 'selected' : ''}>${protocolNames[p]}</option>`).join('')}</select><label class="check-label"><input type="checkbox" data-field="missing" ${this._missing ? 'checked' : ''}>${esc(t('missingOnly'))}</label></div>${this._loadError ? this._notice(this._loadError, 'error', `<div>${this._button('refresh',t('retry'),'refresh','text')}</div>`) : ''}${content}</main>${selected ? this._renderDetails(selected) : ''}</div></div>`;
+    this.shadowRoot.getElementById('app').innerHTML = `<div class="app"><div class="workspace ${selected ? 'has-details' : ''}"><main class="main"><header class="topbar"><button type="button" class="icon-button menu-button" data-action="ha-menu" aria-label="${esc(t('menu'))}">${icon('menu')}</button><h1>Setup Code Manager</h1><span class="refresh-action">${this._iconButton('refresh', t('refresh'), 'refresh')}</span><span class="mobile-toolbar">${this._iconButton('menu', t('menu'), 'more')}</span></header><div class="toolbar">${this._button('add',t('add'),'plus','primary')}${this._button('import',t('import'),'download','secondary-action')}${this._button('export',t('export'),'upload','secondary-action')}</div><nav class="tabs" aria-label="${esc(t('device'))}">${['all','linked','unlinked','archive'].map(tab => `<button type="button" class="tab ${this._tab === tab ? 'active' : ''}" data-action="tab" data-tab="${tab}" aria-pressed="${this._tab === tab}">${esc(t(tab))}<span class="count">${counts[tab]}</span></button>`).join('')}</nav><p class="caption">${esc(t(this._tab === 'archive' ? 'archiveHint' : 'activeHint'))}</p>${this._renderFilters(rows.length, counts[this._tab])}${this._loadError ? this._notice(this._loadError, 'error', `<div>${this._button('refresh',t('retry'),'refresh','text')}</div>`) : ''}${content}</main>${selected ? this._renderDetails(selected) : ''}</div></div>`;
     this._renderedListKey = listKey;
     const main = this.shadowRoot.querySelector('.main');
     if (main) main.scrollTop = this._listScrollTop || 0;
@@ -572,7 +584,8 @@ class SetupCodeManagerPanel extends HTMLElement {
   _onChange(event) {
     const el = event.target; const field = el.dataset.field;
     if (field === 'protocol-filter') { this._protocol = el.value; this._renderMain(); }
-    else if (field === 'missing') { this._missing = el.checked; this._renderMain(); }
+    else if (field === 'code-status-filter') { this._codeStatusFilter = el.value; this._renderMain(); }
+    else if (field === 'room-filter') { this._room = el.value; this._renderMain(); }
     else if (field === 'code-protocol' && this._draft) { this._draft.codes[Number(el.dataset.index)].protocol = el.value; this._activeProtocol = el.value; this._dirty = true; this._renderModal(); }
     else if (field === 'export-format') this._exportFormat = el.value;
     else if (field === 'import-choice') { this._decisions[el.dataset.key] = el.checked ? 'add' : 'skip'; this._renderModal(); }
@@ -590,7 +603,7 @@ class SetupCodeManagerPanel extends HTMLElement {
       else if (action === 'refresh') await this._refresh();
       else if (action === 'refresh-menu') { this._closeModal(true); await this._refresh(); }
       else if (action === 'tab') { this._tab = button.dataset.tab; this._selectedId = null; this._renderMain(); }
-      else if (action === 'reset-filters') { this._query = ''; this._protocol = ''; this._missing = false; this._renderMain(); }
+      else if (action === 'reset-filters') { this._query = ''; this._protocol = ''; this._codeStatusFilter = 'all'; this._room = ''; this._renderMain(); this.shadowRoot.querySelector('[data-field="search"]')?.focus({ preventScroll:true }); }
       else if (action === 'select') { this._selectedId = id; this._revealed.clear(); this._revealedManual.clear(); this._renderMain(); this.scrollIntoView({block:'start',behavior:'instant'}); this.shadowRoot.querySelector('.detail-heading h2')?.setAttribute('tabindex','-1'); this.shadowRoot.querySelector('.detail-heading h2')?.focus({preventScroll:true}); }
       else if (action === 'close-details') this._closeDetails();
       else if (action === 'menu') this._openModal('menu');
