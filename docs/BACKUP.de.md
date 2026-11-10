@@ -92,3 +92,15 @@ noch als praktische Abnahme durchzuführen:
 
 Der erfolgreiche Export allein belegt keine erfolgreiche vollständige
 Wiederherstellung von Home Assistant.
+
+## Teilbestände und Browseransichten ab Beta 8
+
+Der Export kann den Gesamtbestand, die aktuellen Treffer oder markierte Einträge
+enthalten. Teilbestände verwenden dasselbe JSON-/CSV-Format und lassen sich wieder
+importieren, ersetzen aber keine vollständige Inventarsicherung. Die neu aus HA
+abgeleiteten Etagen und Labels gehören nicht zur Inventardatei oder zum Export.
+
+Gespeicherte Ansichten sind persönliche Browser-Einstellungen, getrennt nach HA-
+Instanz und Konto. Sie enthalten Filter, Sortierung und Gruppierung, keine Codes
+oder Suchtexte. Sie werden nicht im HA-Backup oder Inventarexport mitgesichert.
+Druckausgaben und PDF-Dateien sind eigene lesbare Kopien der gewählten Codes.

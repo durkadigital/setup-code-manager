@@ -2,7 +2,9 @@
 import { translator, protocolNames } from './i18n.js';
 import { icon, deviceIcon } from './icons.js';
 import { startScanner, scanImage } from './scanner.js';
-import { filterRecords, availableRooms } from './filters.js';
+import { filterRecords, availableRooms, availableFloors, availableLabels, groupRecordsByRoom, SORTS } from './filters.js';
+import { sanitizeViewSettings, preferenceKey, loadViews, saveViews, MAX_SAVED_VIEWS } from './preferences.js';
+import { printDeviceCards, MAX_PRINT_RECORDS } from './print.js';
 import './qr.js';
 
 const DOMAIN = 'setup_code_manager';
@@ -26,6 +28,9 @@ class SetupCodeManagerPanel extends HTMLElement {
     this._t = translator('en');
     this._devices = []; this._haDevices = []; this._revision = 0;
     this._tab = 'all'; this._query = ''; this._protocol = ''; this._codeStatusFilter = 'all'; this._room = '';
+    this._floor = ''; this._label = ''; this._sort = 'name-asc'; this._group = 'none'; this._filtersOpen = false; this._advancedFiltersOpen = false; this._viewsOpen = false;
+    this._savedViews = []; this._activeViewId = ''; this._viewName = ''; this._preferenceScope = null;
+    this._selection = new Set(); this._selecting = false; this._collapsedGroups = new Set();
     this._revealed = new Set(); this._revealedManual = new Set(); this._formRevealed = new Set(); this._compareRevealed = new Set();
     this._loading = true; this._busy = false; this._loadSequence = 0; this._dialogGeneration = 0;
     this._onClick = this._onClick.bind(this);
@@ -35,7 +40,10 @@ class SetupCodeManagerPanel extends HTMLElement {
     this.shadowRoot.addEventListener('input', this._onInput);
     this.shadowRoot.addEventListener('change', this._onChange);
     this.shadowRoot.addEventListener('submit', event => { event.preventDefault(); if (event.target.id === 'record-form') this._save(); });
-    this.shadowRoot.addEventListener('keydown', event => { if (event.key === 'Escape' && !this._modal && this._selectedId) { event.preventDefault(); event.stopPropagation(); this._closeDetails(); } });
+    this.shadowRoot.addEventListener('keydown', event => { if (event.key !== 'Escape' || this._modal) return; if (this._filtersOpen) { event.preventDefault(); event.stopPropagation(); this._closeFilters(true); } else if (this._selectedId) { event.preventDefault(); event.stopPropagation(); this._closeDetails(); } });
+    this.shadowRoot.addEventListener('toggle',event => { const id = event.target.id; if (this.shadowRoot.getElementById?.(id) !== event.target) return; if (id === 'advanced-filters') this._advancedFiltersOpen = event.target.open; if (id === 'saved-views') this._viewsOpen = event.target.open; if (this._filtersOpen && (id === 'advanced-filters' || id === 'saved-views')) this._positionFilterPanel(); },true);
+    this._outsideFilters = event => { if (!this._filtersOpen || this._inlineFilters()) return; const path = event.composedPath?.() || []; if (!path.includes(this.shadowRoot.getElementById?.('filter-panel')) && !path.includes(this.shadowRoot.querySelector('[data-action="toggle-filters"]'))) this._closeFilters(); };
+    this._resizeFilters = () => { if (this._filtersOpen) this._renderMain(); };
   }
   set hass(value) {
     const languageChanged = this._hass?.language !== value?.language;
@@ -48,9 +56,11 @@ class SetupCodeManagerPanel extends HTMLElement {
   set narrow(value) { this._narrow = value; this.toggleAttribute('narrow', !!value); }
   set panel(value) { this._panel = value; }
   set route(value) { this._route = value; }
-  connectedCallback() { this._connected = true; this._start(); }
+  connectedCallback() { this._connected = true; globalThis.document?.addEventListener?.('pointerdown',this._outsideFilters,true); window.addEventListener?.('resize',this._resizeFilters); this._start(); }
   disconnectedCallback() {
-    this._connected = false; this._started = false; this._loadSequence++; this._dialogGeneration++; this._draft = null; this._modal = null; this._busy = false;
+    globalThis.document?.removeEventListener?.('pointerdown',this._outsideFilters,true); window.removeEventListener?.('resize',this._resizeFilters);
+    this._closeFilters(); this._captureQueue = null; this._printRecords = null; this._printNotes = false; this._selection.clear(); this._selectedId = null;
+    this._connected = false; this._started = false; this._loadSequence++; this._refreshRequest = null; this._dialogGeneration++; this._draft = null; this._modal = null; this._busy = false;
     this._revealed.clear(); this._revealedManual.clear();
     this._unsubscribe?.(); this._unsubscribe = null;
     clearTimeout(this._eventTimer); clearTimeout(this._toastTimer);
@@ -73,14 +83,25 @@ class SetupCodeManagerPanel extends HTMLElement {
     }
   }
   _api(command, data = {}) { return this._hass.callWS({ type:`${DOMAIN}/${command}`, ...data }); }
-  async _refresh(showLoading = true) {
+  _refresh(showLoading = true) {
     const sequence = ++this._loadSequence;
+    const promise = this._runRefresh(sequence,showLoading);
+    this._refreshRequest = {sequence,promise};
+    return promise;
+  }
+  _latestRefreshResult(sequence) {
+    const latest = this._refreshRequest;
+    return this._connected && latest?.sequence > sequence ? latest.promise : undefined;
+  }
+  async _runRefresh(sequence,showLoading) {
     if (showLoading && !this._devices.length) { this._loading = true; this._renderMain(); }
     try {
       const result = await this._api('list');
-      if (sequence !== this._loadSequence || !this._connected) return;
+      if (!this._connected) return;
+      if (sequence !== this._loadSequence) return this._latestRefreshResult(sequence);
       this._devices = result.devices || []; this._revision = result.revision;
-      this._instance = result.instance_id;
+      this._instance = result.instance_id; this._loadViewPreferences();
+      const currentIds = new Set(this._devices.map(record => record.id)); this._selection = new Set([...this._selection].filter(id => currentIds.has(id)));
       this._loadError = ''; this._loading = false;
       const previousIdentity = this._draft && JSON.stringify([this._draft.name,this._draft.location]);
       this._applyDraftIdentity();
@@ -89,7 +110,7 @@ class SetupCodeManagerPanel extends HTMLElement {
       this._renderMain();
       return result;
     } catch (error) {
-      if (sequence !== this._loadSequence) return;
+      if (sequence !== this._loadSequence) return this._latestRefreshResult(sequence);
       this._loading = false; this._loadError = this._errorText(error, 'loadFailed'); this._renderMain();
     }
   }
@@ -121,27 +142,149 @@ class SetupCodeManagerPanel extends HTMLElement {
     el.focus({ preventScroll:true });
     if (typeof snapshot.start === 'number') { try { el.setSelectionRange(snapshot.start, snapshot.end); } catch { /* Select controls have no selection range. */ } }
   }
-  _visibleDevices() {
-    return filterRecords(this._devices, {
-      tab:this._tab, query:this._query, protocol:this._protocol,
-      codeStatus:this._codeStatusFilter, room:this._room,
-    }, this._hass?.language);
+  _viewSettings() {
+    return sanitizeViewSettings({tab:this._tab, protocol:this._protocol, codeStatus:this._codeStatusFilter, room:this._room, floor:this._floor, label:this._label, sort:this._sort, group:this._group});
   }
-  _hasFilters() { return !!(this._query.trim() || this._protocol || this._room || this._codeStatusFilter !== 'all'); }
-  _renderFilters(count, total) {
+  _viewStorage() { try { return window.localStorage; } catch { return null; } }
+  _loadViewPreferences() {
+    const key = preferenceKey(this._instance, this._hass?.user?.id);
+    if (key === this._preferenceScope) return;
+    this._preferenceScope = key; this._activeViewId = ''; this._viewName = '';
+    this._savedViews = loadViews(this._viewStorage(), this._instance, this._hass?.user?.id);
+  }
+  _saveView() {
+    const name = this._viewName.trim();
+    if (!name) { this._toast(this._t('viewNameRequired')); return; }
+    const existing = this._savedViews.find(view => view.id === this._activeViewId && view.name === name);
+    if (this._savedViews.some(view => view.id !== existing?.id && view.name.toLocaleLowerCase() === name.toLocaleLowerCase())) { this._toast(this._t('viewNameExists')); return; }
+    if (!existing && this._savedViews.length >= MAX_SAVED_VIEWS) { this._toast(this._t('viewLimit')); return; }
+    const view = {id:existing?.id || uid(), name, settings:this._viewSettings()};
+    const views = existing ? this._savedViews.map(item => item.id === existing.id ? view : item) : [...this._savedViews,view];
+    if (!saveViews(this._viewStorage(),this._instance,this._hass?.user?.id,views)) { this._toast(this._t('viewStorageFailed')); return; }
+    this._savedViews = views; this._activeViewId = view.id; this._renderMain(); this.shadowRoot.querySelector('[data-field="view-name"]')?.focus({preventScroll:true}); this._toast(this._t('viewSaved'));
+  }
+  _applyView(id) {
+    const view = this._savedViews.find(item => item.id === id);
+    if (!view) return;
+    const s = sanitizeViewSettings(view.settings);
+    this._tab = s.tab; this._protocol = s.protocol; this._codeStatusFilter = s.codeStatus; this._room = s.room; this._floor = s.floor; this._label = s.label; this._sort = s.sort; this._group = s.group;
+    this._query = ''; this._activeViewId = view.id; this._viewName = view.name; this._advancedFiltersOpen = !!(s.floor || s.label || s.group !== 'none');
+    this._selection.clear(); this._selectedId = null; this._collapsedGroups.clear(); this._renderMain();
+  }
+  _deleteView() {
+    const view = this._savedViews.find(item => item.id === this._activeViewId);
+    if (!view || !window.confirm(this._t('deleteViewConfirm',{name:view.name}))) return;
+    const views = this._savedViews.filter(item => item.id !== view.id);
+    if (!saveViews(this._viewStorage(),this._instance,this._hass?.user?.id,views)) { this._toast(this._t('viewStorageFailed')); return; }
+    this._savedViews = views; this._activeViewId = ''; this._viewName = ''; this._renderMain(); this.shadowRoot.querySelector('[data-field="saved-view"]')?.focus({preventScroll:true});
+  }
+  _visibleDevices() {
+    return filterRecords(this._devices, {...this._viewSettings(),query:this._query}, this._hass?.language);
+  }
+  _structuredFilters() {
     const t = this._t;
-    const rooms = availableRooms(this._devices, this._hass?.language);
-    // Keep a selected room visible if HA moves its last device during a refresh.
+    const metadataName = (items,selection,prefix,fallback) => items.find(item => `${prefix}${item.id}` === selection)?.name || t(fallback);
+    return [
+      this._room && ['room',this._room === 'unassigned' ? t('withoutRoom') : this._room.slice(5)],
+      this._floor && ['floor',this._floor === 'unassigned' ? t('withoutFloor') : metadataName(availableFloors(this._devices),this._floor,'floor:','unknownFloor')],
+      this._label && ['label',this._label === 'unassigned' ? t('withoutLabel') : metadataName(availableLabels(this._devices),this._label,'label:','unknownLabel')],
+      this._protocol && ['protocol',protocolNames[this._protocol]],
+      this._codeStatusFilter !== 'all' && ['status',t(this._codeStatusFilter === 'has' ? 'codePresent' : 'missingOnly')],
+    ].filter(Boolean);
+  }
+  _hasFilters() { return !!(this._query.trim() || this._structuredFilters().length); }
+  _selectField(field,label,choices,value) {
+    return `<label class="filter-field"><span>${esc(label)}</span><select data-field="${field}" data-focus="${field}">${choices.map(([id,name]) => `<option value="${esc(id)}" ${value === id ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select></label>`;
+  }
+  _inlineFilters() { return (this.getBoundingClientRect?.().width || window.innerWidth || 1200) <= 800; }
+  _renderFilters(count,total) {
+    const t = this._t, chips = this._structuredFilters();
+    const rooms = availableRooms(this._devices,this._hass?.language);
     if (this._room.startsWith('room:') && !rooms.includes(this._room.slice(5))) rooms.push(this._room.slice(5));
-    return `<div class="filters">
-      <label class="search">${icon('search')}<input type="search" data-field="search" data-focus="search" placeholder="${esc(t('search'))}" aria-label="${esc(t('search'))}" value="${esc(this._query)}" autocomplete="off" spellcheck="false"></label>
+    const metadataChoices = (items,prefix,selection,all,none,unknown) => {
+      const choices = [['',t(all)],['unassigned',t(none)],...items.map(item => [`${prefix}${item.id}`,item.name])];
+      if (selection.startsWith(prefix) && !choices.some(([id]) => id === selection)) choices.push([selection,t(unknown)]);
+      return choices;
+    };
+    const panel = `<section id="filter-panel" class="filter-panel ${this._inlineFilters() ? 'inline' : 'floating'}" aria-label="${esc(t('filters'))}" ${this._filtersOpen ? '' : 'hidden'} ${this._inlineFilters() ? '' : 'popover="auto"'}>
+      <div class="filter-panel-heading"><strong>${esc(t('filters'))}</strong>${this._button('close-filters',t('done'),'','text')}</div>
       <div class="filter-options">
-        <label class="filter-field room-filter"><span>${esc(t('room'))}</span><select data-field="room-filter" data-focus="room-filter"><option value="">${esc(t('allRooms'))}</option><option value="unassigned" ${this._room === 'unassigned' ? 'selected' : ''}>${esc(t('withoutRoom'))}</option>${rooms.map(room => `<option value="room:${esc(room)}" ${this._room === `room:${room}` ? 'selected' : ''}>${esc(room)}</option>`).join('')}</select></label>
-        <label class="filter-field"><span>${esc(t('protocol'))}</span><select data-field="protocol-filter" data-focus="protocol-filter"><option value="">${esc(t('allProtocols'))}</option>${PROTOCOLS.map(p => `<option value="${p}" ${this._protocol === p ? 'selected' : ''}>${protocolNames[p]}</option>`).join('')}</select></label>
-        <label class="filter-field"><span>${esc(t('codeStatus'))}</span><select data-field="code-status-filter" data-focus="code-status-filter"><option value="all">${esc(t('allCodes'))}</option><option value="has" ${this._codeStatusFilter === 'has' ? 'selected' : ''}>${esc(t('codePresent'))}</option><option value="missing" ${this._codeStatusFilter === 'missing' ? 'selected' : ''}>${esc(t('missingOnly'))}</option></select></label>
+        ${this._selectField('room-filter',t('room'),[['',t('allRooms')],['unassigned',t('withoutRoom')],...rooms.map(room => [`room:${room}`,room])],this._room)}
+        ${this._selectField('protocol-filter',t('protocol'),[['',t('allProtocols')],...PROTOCOLS.map(p => [p,protocolNames[p]])],this._protocol)}
+        ${this._selectField('code-status-filter',t('codeStatus'),[['all',t('allCodes')],['has',t('codePresent')],['missing',t('missingOnly')]],this._codeStatusFilter)}
+        <details id="advanced-filters" class="filter-disclosure advanced-filters" ${this._advancedFiltersOpen ? 'open' : ''}><summary>${esc(t('moreFilters'))}</summary><div class="filter-options">
+        ${this._selectField('floor-filter',t('floor'),metadataChoices(availableFloors(this._devices,this._hass?.language),'floor:',this._floor,'allFloors','withoutFloor','unknownFloor'),this._floor)}
+        ${this._selectField('label-filter',t('haLabel'),metadataChoices(availableLabels(this._devices,this._hass?.language),'label:',this._label,'allLabels','withoutLabel','unknownLabel'),this._label)}
+        ${this._selectField('group-filter',t('groupBy'),[['none',t('noGrouping')],['room',t('room')]],this._group)}
+        </div><p class="small muted">${esc(t('haFilterHint'))}</p></details>
       </div>
-      ${this._hasFilters() ? `<div class="filter-summary"><span role="status" aria-live="polite">${esc(t('filteredCount', { count, total }))}</span>${this._button('reset-filters',t('resetFilters'),'','text')}</div>` : ''}
+      <details id="saved-views" class="filter-disclosure saved-views" ${this._viewsOpen ? 'open' : ''}><summary>${esc(t('savedViews'))}${this._savedViews.length ? ` (${this._savedViews.length})` : ''}</summary><div class="saved-view-fields">
+        ${this._selectField('saved-view',t('savedViews'),[['',t('chooseView')],...this._savedViews.map(view => [view.id,view.name])],this._activeViewId)}
+        <label class="filter-field"><span>${esc(t('viewName'))}</span><input data-field="view-name" data-focus="view-name" maxlength="80" value="${esc(this._viewName)}" autocomplete="off"></label>
+        <div class="view-actions">${this._button('save-view',t(this._savedViews.some(view => view.id === this._activeViewId && view.name === this._viewName.trim()) ? 'updateView' : 'saveView'),'','text')}${this._activeViewId ? this._button('delete-view',t('deleteView'),'','text') : ''}</div>
+        <p class="small muted">${esc(t('viewStorageHint'))}</p>
+      </div></details>
+      <div class="filter-footer">${this._button('reset-filters',t('resetFilters'),'','text')}${this._button('close-filters',t('done'),'','text')}</div>
+    </section>`;
+    return `<div class="filters">
+      <div class="search-row"><label class="search">${icon('search')}<input type="search" data-field="search" data-focus="search" placeholder="${esc(t('search'))}" aria-label="${esc(t('search'))}" value="${esc(this._query)}" autocomplete="off" spellcheck="false"></label>
+      <button type="button" class="button filter-toggle" data-action="toggle-filters" data-focus="filter-toggle" aria-expanded="${this._filtersOpen}" aria-controls="filter-panel">${icon('filter')}${esc(t('filters'))}${chips.length ? `<span class="count">${chips.length}</span>` : ''}</button>
+      ${this._selectField('sort-filter',t('sortBy'),SORTS.map(sort => [sort,t(`sort_${sort}`)]),this._sort)}</div>
+      ${panel}
+      ${chips.length ? `<div class="active-filters" aria-label="${esc(t('activeFilters'))}">${chips.map(([key,label]) => `<button type="button" class="chip active" data-action="remove-filter" data-filter="${key}" aria-label="${esc(t('removeFilter',{name:label}))}">${esc(label)}${icon('close')}</button>`).join('')}</div>` : ''}
+      <div class="list-actions"><span class="filter-count" role="status" aria-live="polite">${esc(t('filteredCount',{count,total}))}</span><div>${this._hasFilters() ? this._button('reset-filters',t('resetFilters'),'','text') : ''}${this._button('toggle-selection',t(this._selecting ? 'finishSelection' : 'selectRecords'),'','text')}</div></div>
     </div>`;
+  }
+  _setupFilterPanel() {
+    const panel = this.shadowRoot.getElementById?.('filter-panel');
+    if (!panel || !this._filtersOpen || this._inlineFilters()) return;
+    try { if (panel.showPopover && !panel.matches(':popover-open')) panel.showPopover(); } catch { /* Older clients use the same fixed panel. */ }
+    this._positionFilterPanel();
+    panel.addEventListener('toggle',event => { if (event.newState === 'closed' && this.shadowRoot.getElementById?.('filter-panel') === panel && this._filtersOpen) this._closeFilters(); });
+  }
+  _positionFilterPanel() {
+    const panel = this.shadowRoot.getElementById?.('filter-panel');
+    if (!panel || !this._filtersOpen || this._inlineFilters()) return;
+    const button = this.shadowRoot.querySelector('[data-action="toggle-filters"]');
+    const rect = button?.getBoundingClientRect();
+    if (rect) {
+      const width = Math.min(470,window.innerWidth - 24);
+      const below = window.innerHeight-rect.bottom-20, above = rect.top-20;
+      const openBelow = below >= 260 || below >= above;
+      panel.style.width = `${width}px`;
+      panel.style.maxHeight = `${Math.max(120,openBelow ? below : above)}px`;
+      panel.style.left = `${Math.max(12,Math.min(rect.right-width,window.innerWidth-width-12))}px`;
+      panel.style.top = `${openBelow ? rect.bottom+8 : Math.max(12,rect.top-panel.getBoundingClientRect().height-8)}px`;
+    }
+  }
+  _closeFilters(restoreFocus = false) {
+    this._filtersOpen = false;
+    const panel = this.shadowRoot.getElementById?.('filter-panel');
+    try { panel?.hidePopover?.(); } catch { /* Already closed. */ }
+    if (panel) panel.hidden = true;
+    const button = this.shadowRoot.querySelector('[data-action="toggle-filters"]');
+    button?.setAttribute('aria-expanded','false');
+    if (restoreFocus) button?.focus({preventScroll:true});
+  }
+  _resetFilters() {
+    this._query = ''; this._protocol = ''; this._codeStatusFilter = 'all'; this._room = ''; this._floor = ''; this._label = ''; this._activeViewId = ''; this._viewName = '';
+    this._selection.clear(); this._renderMain(); this.shadowRoot.querySelector('[data-field="search"]')?.focus({preventScroll:true});
+  }
+  _renderListRow(record,selected) {
+    const t = this._t;
+    const action = this._selecting ? 'toggle-record' : 'select';
+    return `<tr data-action="${action}" data-id="${esc(record.id)}" class="${selected?.id === record.id ? 'selected' : ''}"><td><div class="device-name">${this._selecting ? `<label class="record-check" data-action="ignore-selection"><input type="checkbox" data-field="record-selection" data-focus="record-selection-${esc(record.id)}" data-id="${esc(record.id)}" aria-label="${esc(t('selectDevice',{name:record.name}))}" ${this._selection.has(record.id) ? 'checked' : ''}></label>` : icon(deviceIcon(record))}<div><button type="button" class="row-open" data-focus="record-row-${esc(record.id)}" data-action="${action}" data-id="${esc(record.id)}">${esc(record.name)}</button><div class="mobile-meta">${esc([record.location,displayProtocols(record).map(p => protocolNames[p]).join(', ')].filter(Boolean).join(' · '))}</div><div class="mobile-codes">${this._codeStatus(record)}${this._status(record)}</div></div></div></td><td class="location-column">${esc(record.location || '—')}</td><td><div class="code-summary">${esc(displayProtocols(record).map(p => protocolNames[p]).join(', ') || '—')}<div>${this._codeStatus(record)}</div></div></td><td>${this._status(record)}</td></tr>`;
+  }
+  _renderDeviceTable(rows,selected) {
+    const t = this._t;
+    const body = this._group === 'room' ? groupRecordsByRoom(rows,this._hass?.language).map(group => `<tr class="room-group"><td colspan="4"><button type="button" data-action="toggle-group" data-group="${esc(group.key)}" data-focus="room-group-${esc(group.key)}" aria-expanded="${!this._collapsedGroups.has(group.key)}">${icon('chevron')}<strong>${esc(group.roomNames.length > 1 ? t('multipleRooms',{rooms:group.roomNames.join(' · ')}) : group.roomNames[0] || t('withoutRoom'))}</strong><span class="count">${group.records.length}</span></button></td></tr>${this._collapsedGroups.has(group.key) ? '' : group.records.map(record => this._renderListRow(record,selected)).join('')}`).join('') : rows.map(record => this._renderListRow(record,selected)).join('');
+    return `<div class="table-wrap"><table class="device-table"><colgroup><col class="device-col" style="width:34%"><col class="location-column" style="width:19%"><col class="codes-col" style="width:21%"><col class="status-col" style="width:26%"></colgroup><thead><tr><th scope="col">${esc(t('device'))}</th><th scope="col" class="location-column">${esc(t('location'))}</th><th scope="col">${esc(t('codes'))}</th><th scope="col">Home Assistant</th></tr></thead><tbody>${body}</tbody></table></div>`;
+  }
+  _selectionRecords() { return this._visibleDevices().filter(record => this._selection.has(record.id)); }
+  _renderSelectionBar(rows) {
+    if (!this._selecting) return '';
+    const t = this._t, selected = this._selectionRecords();
+    return `<div class="selection-bar"><strong>${esc(t('selectedCount',{count:selected.length}))}</strong>${this._button('select-results',t(rows.length && rows.every(record => this._selection.has(record.id)) ? 'deselectAll' : 'selectResults'),'','text')}${this._button('export-selected',t('export'),'upload','',selected.length ? '' : 'disabled')}${this._button('print-selected',t('printCards'),'print','',selected.length && selected.length <= MAX_PRINT_RECORDS ? '' : 'disabled')}</div>`;
   }
   _codeStatus(record) {
     const stored = hasCode(record);
@@ -172,7 +315,7 @@ class SetupCodeManagerPanel extends HTMLElement {
   }
   _renderMain() {
     const snapshot = this._focusSnapshot();
-    const listKey = JSON.stringify([this._tab,this._query,this._protocol,this._codeStatusFilter,this._room]);
+    const listKey = JSON.stringify([this._viewSettings(),this._query]);
     const previousMain = this.shadowRoot.querySelector('.main');
     if (this._renderedListKey !== listKey) this._listScrollTop = 0;
     // Mobile details hide the list; its scrollTop then reads zero. Keep the last
@@ -192,8 +335,8 @@ class SetupCodeManagerPanel extends HTMLElement {
       const filtered = this._hasFilters();
       const title = filtered ? 'noResults' : this._tab === 'archive' ? 'emptyArchive' : this._tab === 'linked' ? 'emptyLinked' : this._tab === 'unlinked' && this._devices.length ? 'emptyUnlinked' : 'emptyTitle';
       content = `<div class="empty">${icon(this._tab === 'archive' ? 'archive' : 'key')}<h2>${esc(t(title))}</h2><p>${esc(t(filtered ? 'noResultsBody' : this._tab === 'archive' ? 'emptyArchiveBody' : 'emptyBody'))}</p>${filtered ? '' : this._button('add',t('add'),'plus','primary')}</div>`;
-    } else content = `<div class="table-wrap"><table class="device-table"><colgroup><col class="device-col" style="width:34%"><col class="location-column" style="width:19%"><col class="codes-col" style="width:21%"><col class="status-col" style="width:26%"></colgroup><thead><tr><th scope="col">${esc(t('device'))}</th><th scope="col" class="location-column">${esc(t('location'))}</th><th scope="col">${esc(t('codes'))}</th><th scope="col">Home Assistant</th></tr></thead><tbody>${rows.map(record => `<tr data-action="select" data-id="${esc(record.id)}" class="${selected?.id === record.id ? 'selected' : ''}"><td><div class="device-name">${icon(deviceIcon(record))}<div><button type="button" class="row-open" data-action="select" data-id="${esc(record.id)}">${esc(record.name)}</button><div class="mobile-meta">${esc([record.location, displayProtocols(record).map(p => protocolNames[p]).join(', ')].filter(Boolean).join(' · '))}</div><div class="mobile-codes">${this._codeStatus(record)}${this._status(record)}</div></div></div></td><td class="location-column">${esc(record.location || '—')}</td><td><div class="code-summary">${esc(displayProtocols(record).map(p => protocolNames[p]).join(', ') || '—')}<div>${this._codeStatus(record)}</div></div></td><td>${this._status(record)}</td></tr>`).join('')}</tbody></table></div>`;
-    this.shadowRoot.getElementById('app').innerHTML = `<div class="app"><div class="workspace ${selected ? 'has-details' : ''}"><main class="main"><header class="topbar"><button type="button" class="icon-button menu-button" data-action="ha-menu" aria-label="${esc(t('menu'))}">${icon('menu')}</button><h1>Setup Code Manager</h1><span class="refresh-action">${this._iconButton('refresh', t('refresh'), 'refresh')}</span><span class="mobile-toolbar">${this._iconButton('menu', t('menu'), 'more')}</span></header><div class="toolbar">${this._button('add',t('add'),'plus','primary')}${this._button('import',t('import'),'download','secondary-action')}${this._button('export',t('export'),'upload','secondary-action')}</div><nav class="tabs" aria-label="${esc(t('device'))}">${['all','linked','unlinked','archive'].map(tab => `<button type="button" class="tab ${this._tab === tab ? 'active' : ''}" data-action="tab" data-tab="${tab}" aria-pressed="${this._tab === tab}">${esc(t(tab))}<span class="count">${counts[tab]}</span></button>`).join('')}</nav><p class="caption">${esc(t(this._tab === 'archive' ? 'archiveHint' : 'activeHint'))}</p>${this._renderFilters(rows.length, counts[this._tab])}${this._loadError ? this._notice(this._loadError, 'error', `<div>${this._button('refresh',t('retry'),'refresh','text')}</div>`) : ''}${content}</main>${selected ? this._renderDetails(selected) : ''}</div></div>`;
+    } else content = this._renderDeviceTable(rows,selected);
+    this.shadowRoot.getElementById('app').innerHTML = `<div class="app"><div class="workspace ${selected ? 'has-details' : ''}"><main class="main"><header class="topbar"><button type="button" class="icon-button menu-button" data-action="ha-menu" aria-label="${esc(t('menu'))}">${icon('menu')}</button><h1>Setup Code Manager</h1><span class="refresh-action">${this._iconButton('refresh', t('refresh'), 'refresh')}</span><span class="mobile-toolbar">${this._iconButton('menu', t('menu'), 'more')}</span></header><div class="toolbar">${this._button('add',t('add'),'plus','primary')}${this._button('import',t('import'),'download','secondary-action')}${this._button('export',t('export'),'upload','secondary-action')}${this._button('capture-start',t('captureAction'),'camera','secondary-action')}</div><nav class="tabs" aria-label="${esc(t('device'))}">${['all','linked','unlinked','archive'].map(tab => `<button type="button" class="tab ${this._tab === tab ? 'active' : ''}" data-action="tab" data-tab="${tab}" aria-pressed="${this._tab === tab}">${esc(t(tab))}<span class="count">${counts[tab]}</span></button>`).join('')}</nav><p class="caption">${esc(t(this._tab === 'archive' ? 'archiveHint' : 'activeHint'))}</p>${this._renderFilters(rows.length, counts[this._tab])}${this._loadError ? this._notice(this._loadError, 'error', `<div>${this._button('refresh',t('retry'),'refresh','text')}</div>`) : ''}${this._renderSelectionBar(rows)}${content}</main>${selected ? this._renderDetails(selected) : ''}</div></div>`;
     this._renderedListKey = listKey;
     const main = this.shadowRoot.querySelector('.main');
     if (main) main.scrollTop = this._listScrollTop || 0;
@@ -202,7 +345,7 @@ class SetupCodeManagerPanel extends HTMLElement {
       const scrollBody = this.shadowRoot.querySelector('.detail-body') || this.shadowRoot.querySelector('.details');
       if (scrollBody) scrollBody.scrollTop = detailScroll;
     }
-    this._restoreFocus(snapshot);
+    this._setupFilterPanel(); this._restoreFocus(snapshot);
   }
   _closeDetails() {
     const id = this._selectedId;
@@ -214,7 +357,7 @@ class SetupCodeManagerPanel extends HTMLElement {
   _renderDetails(record) {
     const t = this._t;
     const links = record.links || [];
-    return `<aside class="details" aria-label="${esc(record.name)}"><div class="detail-heading"><div><h2 title="${esc(record.name)}">${esc(record.name)}</h2></div>${this._iconButton('close-details',t('close'),'close')}</div><div class="detail-body"><div class="detail-meta">${this._codeStatus(record)}<p>${esc([record.location,record.model].filter(Boolean).join(' · ') || record.manufacturer || '')}</p>${record.archived ? `<span class="badge">${icon('archive')}${esc(t('archived'))}</span>` : ''}</div><div class="detail-actions">${this._button('edit',t('edit'),'','text',`data-id="${esc(record.id)}"`)}</div><section class="detail-section"><h3>Home Assistant</h3><div class="detail-status">${this._status(record)}</div>${links.some(link => link.active === false) ? `<p class="muted small" style="margin-top:12px">${esc(t('removedHint'))}</p>` : ''}${links.filter(link => link.active !== false).map(link => `<div class="link-item"><span class="small muted">${esc(link.name || record.name)}</span><a class="button" href="/config/devices/device/${encodeURIComponent(link.ha_device_id)}">${icon('external')}${esc(t('openDevice'))}</a></div>`).join('')}${this._button('edit-links',t(links.length ? 'changeLinks' : 'linkDevice'),'link','text',`data-id="${esc(record.id)}"`)}</section><section class="detail-section"><h3>${esc(t('setupCodes'))}</h3>${recordCodes(record).length ? recordCodes(record).map(code => this._renderCode(code)).join('') : `<p class="muted">${esc(t('noCode'))}</p>`}${this._button('edit-codes',t('addCode'),'plus','text',`data-id="${esc(record.id)}"`)}</section><section class="detail-section"><h3>${esc(t('note'))}</h3><p class="muted">${esc(record.notes || t('noNote'))}</p>${record.manufacturer || record.serial_number ? `<p class="small muted" style="margin-top:16px">${esc([record.manufacturer, record.serial_number].filter(Boolean).join(' · '))}</p>` : ''}</section><section class="detail-section detail-bottom">${this._button('archive',t(record.archived ? 'restore' : 'archiveAction'),record.archived ? 'restore' : 'archive','text',`data-id="${esc(record.id)}"`)}${this._button('delete',t('delete'),'trash','text danger',`data-id="${esc(record.id)}"`)}</section></div></aside>`;
+    return `<aside class="details" aria-label="${esc(record.name)}"><div class="detail-heading"><div><h2 title="${esc(record.name)}">${esc(record.name)}</h2></div>${this._iconButton('close-details',t('close'),'close')}</div><div class="detail-body"><div class="detail-meta">${this._codeStatus(record)}<p>${esc([record.location,record.model].filter(Boolean).join(' · ') || record.manufacturer || '')}</p>${record.archived ? `<span class="badge">${icon('archive')}${esc(t('archived'))}</span>` : ''}</div><div class="detail-actions">${this._button('edit',t('edit'),'','text',`data-id="${esc(record.id)}"`)}${this._button('print-record',t('printCard'),'print','text',`data-id="${esc(record.id)}"`)}</div><section class="detail-section"><h3>Home Assistant</h3><div class="detail-status">${this._status(record)}</div>${links.some(link => link.active === false) ? `<p class="muted small" style="margin-top:12px">${esc(t('removedHint'))}</p>` : ''}${links.filter(link => link.active !== false).map(link => `<div class="link-item"><span class="small muted">${esc(link.name || record.name)}</span><a class="button" href="/config/devices/device/${encodeURIComponent(link.ha_device_id)}">${icon('external')}${esc(t('openDevice'))}</a></div>`).join('')}${this._button('edit-links',t(links.length ? 'changeLinks' : 'linkDevice'),'link','text',`data-id="${esc(record.id)}"`)}</section><section class="detail-section"><h3>${esc(t('setupCodes'))}</h3>${recordCodes(record).length ? recordCodes(record).map(code => this._renderCode(code)).join('') : `<p class="muted">${esc(t('noCode'))}</p>`}${this._button('edit-codes',t('addCode'),'plus','text',`data-id="${esc(record.id)}"`)}</section><section class="detail-section"><h3>${esc(t('note'))}</h3><p class="muted">${esc(record.notes || t('noNote'))}</p>${record.manufacturer || record.serial_number ? `<p class="small muted" style="margin-top:16px">${esc([record.manufacturer, record.serial_number].filter(Boolean).join(' · '))}</p>` : ''}</section><section class="detail-section detail-bottom">${this._button('archive',t(record.archived ? 'restore' : 'archiveAction'),record.archived ? 'restore' : 'archive','text',`data-id="${esc(record.id)}"`)}${this._button('delete',t('delete'),'trash','text danger',`data-id="${esc(record.id)}"`)}</section></div></aside>`;
   }
   _manualValue(code) {
     return code?.protocol === 'matter' && code.value?.startsWith('MT:') && typeof code.manual_value === 'string' && /^(?:[0-9]{11}|[0-9]{21})$/.test(code.manual_value) ? code.manual_value : '';
@@ -257,10 +400,10 @@ class SetupCodeManagerPanel extends HTMLElement {
     this._formRevealed.clear(); this._compareRevealed.clear(); this._activeProtocol = this._protocol || 'matter';
   }
   _openModal(kind, data = {}) {
-    this._stopCamera(); this._modalError = ''; this._modal = { kind,...data };
+    this._closeFilters(); this._stopCamera(); this._modalError = ''; this._modal = { kind,...data };
     this._renderModal();
   }
-  _closeModal(force = false) {
+  _closeModal(force = false, preserveCapture = false) {
     if (this._busyBlocks('close-modal')) return;
     if (this._readingPhoto) {
       this._photoController?.abort(); this._photoController = null; this._readingPhoto = false; this._busy = false;
@@ -268,7 +411,8 @@ class SetupCodeManagerPanel extends HTMLElement {
     if (!force && this._draft && this._dirty && ['editor','picker','choose-record','code-conflict','scanner','start','revision','duplicate'].includes(this._modal?.kind) && !window.confirm(this._t('discard'))) { this._renderModal(); return; }
     this._dialogGeneration++; this._stopCamera(); this._photoController?.abort(); this._photoController = null; this._readingPhoto = false; this.shadowRoot.querySelector('dialog')?.close();
     this.shadowRoot.getElementById('modal-root').innerHTML = ''; this._modal = null;
-    this._draft = null; this._pendingCodes = null; this._preview = null; this._importSource = null;
+    this._draft = null; this._pendingCodes = null; this._preview = null; this._importSource = null; this._printRecords = null;
+    if (!preserveCapture) this._captureQueue = null;
     this._formRevealed.clear(); this._compareRevealed.clear();
     this.shadowRoot.querySelector(this._selectedId ? '[data-action="edit"]' : '[data-action="add"]')?.focus();
   }
@@ -284,7 +428,7 @@ class SetupCodeManagerPanel extends HTMLElement {
     const cancel = this._button('close-modal',t('cancel'));
     let html = '';
     if (kind === 'start') html = this._modalFrame(t('addTitle'), `<p>${esc(t(this._canLiveScan() ? 'addIntro' : 'photoHint'))}</p><div class="choice-list">${[['start-scan',this._canLiveScan() ? 'scan' : 'takePhoto','camera'],['start-photo','photo','image'],['start-manual','manual','keyboard']].map(([action,label,image]) => `<button type="button" class="choice" data-action="${action}">${icon(image)}<span class="grow">${esc(t(label))}</span>${icon('chevron')}</button>`).join('')}</div><p class="small muted" style="margin-top:22px">${esc(t('noPairing'))}</p>`);
-    else if (kind === 'menu') html = this._modalFrame(t('menu'),`<div class="choice-list">${this._button('import',t('import'),'download')}${this._button('export',t('export'),'upload')}${this._button('refresh-menu',t('refresh'),'refresh')}</div>`);
+    else if (kind === 'menu') html = this._modalFrame(t('menu'),`<div class="choice-list">${this._button('import',t('import'),'download')}${this._button('export',t('export'),'upload')}${this._button('capture-start',t('captureMissing'),'camera')}${this._button('print-filtered',t('printCards'),'print')}${this._button('refresh-menu',t('refresh'),'refresh')}</div>`);
     else if (kind === 'editor') html = this._renderEditor();
     else if (kind === 'scanner') html = this._modalFrame(t('scanTitle'), `<p>${esc(t('scanHint'))}</p><div id="scanner-error"></div><div class="scanner-frame"><video id="scan-video" autoplay muted playsinline></video><div class="scan-guide"></div><div class="camera-status" id="camera-status">${esc(t('cameraLoading'))}</div></div><p class="small">${esc(t('noPairing'))}</p><div class="scanner-buttons">${this._button('scan-capture',t('takePhoto'),'camera')}${this._button('scan-photo',t('photo'),'image')}${this._button('scan-manual',t('enterCode'),'keyboard')}</div>`);
     else if (kind === 'picker') html = this._renderPicker();
@@ -293,7 +437,9 @@ class SetupCodeManagerPanel extends HTMLElement {
     else if (kind === 'duplicate') html = this._modalFrame(t('duplicateTitle'),this._notice(t('duplicateBody',{names:this._modal.names.join(', ')}),'warning'),this._button('back-editor',t('back'))+this._button('save-anyway',t('saveAnyway'),'','primary'));
     else if (kind === 'delete') html = this._modalFrame(t('deleteTitle'),`<p>${esc(t('deleteBody',{name:this._modal.record.name,count:recordCodes(this._modal.record).length}))}</p>`,cancel+this._button('confirm-delete',t('delete'),'trash','primary danger'));
     else if (kind === 'qr') html = this._modalFrame(t('qr'),`<div id="qr-display" class="qr-display"></div><p style="text-align:center">${esc(this._modal.name)} · ${esc(protocolNames[this._modal.code.protocol])}</p>`,this._button('close-modal',t('close')));
-    else if (kind === 'export') html = this._modalFrame(t('exportTitle'),`<p>${esc(t('exportScope'))}</p><div class="export-options">${[['json','fullBackup','JSON'],['csv','tableFormat','CSV']].map(([format,label,description]) => `<label class="export-option"><input type="radio" name="export-format" data-field="export-format" value="${format}" ${(this._exportFormat || 'json') === format ? 'checked' : ''}><div><strong>${esc(t(label))}</strong><small>${description}</small></div></label>`).join('')}</div><p class="small">${esc(t('exportHint'))}</p>${this._notice(t('exportWarning'),'warning')}`,cancel+this._button('download-export',t(this._busy ? 'exporting' : 'export'),'upload','primary'));
+    else if (kind === 'export') html = this._renderExport();
+    else if (kind === 'print') html = this._renderPrint();
+    else if (kind === 'capture-setup') html = this._renderCaptureSetup();
     else if (kind === 'import') html = this._modalFrame(t('importTitle'),`<p>${esc(t('importIntro'))}</p><div class="choice-list">${this._button('pick-import',t('chooseFile'),'download')}</div>`);
     else if (kind === 'preview') html = this._renderPreview();
     else if (kind === 'revision') html = this._renderRevision();
@@ -305,7 +451,7 @@ class SetupCodeManagerPanel extends HTMLElement {
     dialog.showModal();
     if (this._busy) dialog.querySelectorAll('input,select,textarea,button').forEach(control => { control.disabled = this._busyBlocks(control.dataset.action); });
     if (snapshot && snapshot.key !== 'search') this._restoreFocus(snapshot);
-    else if (kind === 'editor') this.shadowRoot.querySelector(this._identityManaged() ? '[data-field="notes"]' : '[data-field="name"]')?.focus({preventScroll:true});
+    else if (kind === 'editor') this.shadowRoot.querySelector(this._captureQueue ? `[data-field="code-value"][data-index="${this._draft.codes.findIndex(code => code.protocol === this._captureQueue.protocol)}"]` : this._identityManaged() ? '[data-field="notes"]' : '[data-field="name"]')?.focus({preventScroll:true});
     else if (kind === 'picker') this.shadowRoot.querySelector('[data-field="picker-search"]')?.focus({preventScroll:true});
     if (kind === 'qr') {
       try { this.shadowRoot.getElementById('qr-display').innerHTML = window.SetupCodesQR.renderSVG(this._modal.code.value,{pixelSize:6,whiteColor:'#ffffff',blackColor:'#000000'}); }
@@ -319,8 +465,8 @@ class SetupCodeManagerPanel extends HTMLElement {
     this._applyDraftIdentity();
     const t = this._t; const draft = this._draft;
     const errorExtra = this._draftErrorCode === 'conflict' ? `<div>${this._button('compare-revision',t('compareCurrent'),'refresh','text')}</div>` : this._draftErrorCode === 'device_removed' ? `<div>${this._button('unlink-save',t('withoutLinkSave'),'unlink','text')}${this._button('picker',t('pickerTitle'),'link','text')}</div>` : this._draftErrorCode === 'duplicate_link' || this._draftErrorCode === 'archived_target' ? `<div>${this._button('picker',t('pickerTitle'),'link','text')}</div>` : '';
-    const body = `${this._readingPhoto ? `<div class="notice" role="status"><span class="spinner" aria-hidden="true"></span>${esc(t('readingPhoto'))}</div>` : ''}<form id="record-form">${this._detected ? this._notice(t('codeDetected',{protocol:protocolNames[this._detected]}),'success') : ''}${draft.archived ? this._notice(t('archivedTarget')) : ''}${this._draftError ? this._notice(this._draftError,'error',errorExtra) : ''}${this._renderIdentity()}${this._field('notes','textarea')}<details class="more" ${this._moreOpen ? 'open' : ''}><summary>${esc(t('moreDetails'))}</summary><div><div class="field-row">${this._field('manufacturer')}${this._field('model')}</div>${this._field('serial_number')}</div></details><section class="editor-section"><h3>${esc(t('setupCodes'))}</h3>${draft.codes.map((code,index) => `<div class="editor-code"><div class="code-title"><select data-field="code-protocol" data-index="${index}" aria-label="${esc(t('protocol'))}">${PROTOCOLS.map(p => `<option value="${p}" ${code.protocol === p ? 'selected' : ''} ${draft.codes.some((other,i) => i !== index && other.protocol === p) ? 'disabled' : ''}>${protocolNames[p]}</option>`).join('')}</select>${this._iconButton('remove-code',t('removeCode'),'trash',`data-index="${index}"`)}</div><label class="field"><span>${esc(t('codeValue'))}</span><div class="input-secret"><input type="${this._formRevealed.has(code.id) ? 'text' : 'password'}" data-field="code-value" data-focus="code-${index}" data-index="${index}" value="${esc(code.value)}" autocomplete="off" spellcheck="false" maxlength="4096">${this._iconButton('form-reveal',t(this._formRevealed.has(code.id) ? 'hide' : 'reveal'),'eye',`data-index="${index}"`)}</div></label><div class="code-tools">${this._button('code-scan',t(this._canLiveScan() ? (code.value ? 'rescan' : 'scan') : 'takePhoto'),'camera','text',`data-protocol="${code.protocol}"`)}${this._button('code-photo',t('photo'),'image','text',`data-protocol="${code.protocol}"`)}</div><label class="field"><span>${esc(t('codeLabel'))}</span><input type="text" data-field="code-label" data-focus="label-${index}" data-index="${index}" value="${esc(code.label)}" placeholder="${esc(t('codeLabelPlaceholder'))}" maxlength="256"></label></div>`).join('')}${draft.codes.length < PROTOCOLS.length ? this._button('add-slot',t('addCode'),'plus','text') : ''}</section><section class="editor-section"><h3>Home Assistant</h3><div class="link-box">${draft.links?.length ? draft.links.map((link,index) => `<div class="link-item">${icon('link')}<span>${esc(link.name || this._haDevices.find(d => d.id === link.ha_device_id)?.name || this._devices.find(r => r.links?.some(l => l.ha_device_id === link.ha_device_id))?.name || link.ha_device_id)}${link.active === false ? `<small class="muted" style="display:block">${esc(t('unlinked'))}</small>` : ''}</span>${this._iconButton('remove-link',t('removeLink'),'close',`data-index="${index}"`)}</div>`).join('') : `<p class="muted">${esc(t('noLink'))}</p>`}${this._button('picker',t(draft.links?.length ? 'changeLinks' : 'linkDevice'),'link','text')}<p class="muted">${esc(t('linkLater'))}</p></div></section></form>`;
-    return this._modalFrame(t(draft.id ? 'editTitle' : 'addTitle'),body,this._button('close-modal',t('cancel'))+`<button type="submit" form="record-form" class="button primary" ${this._busy ? 'disabled' : ''}>${this._busy && !this._readingPhoto ? '<span class="spinner"></span>' : ''}${esc(t(this._busy && !this._readingPhoto ? 'saving' : 'save'))}</button>`);
+    const body = `${this._captureQueue ? `<div class="capture-progress" role="status">${esc(t('captureProgress',{current:this._captureQueue.index+1,total:this._captureQueue.ids.length,protocol:protocolNames[this._captureQueue.protocol]}))}</div>` : ''}${this._readingPhoto ? `<div class="notice" role="status"><span class="spinner" aria-hidden="true"></span>${esc(t('readingPhoto'))}</div>` : ''}<form id="record-form">${this._detected ? this._notice(t('codeDetected',{protocol:protocolNames[this._detected]}),'success') : ''}${draft.archived ? this._notice(t('archivedTarget')) : ''}${this._draftError ? this._notice(this._draftError,'error',errorExtra) : ''}${this._renderIdentity()}${this._field('notes','textarea')}<details class="more" ${this._moreOpen ? 'open' : ''}><summary>${esc(t('moreDetails'))}</summary><div><div class="field-row">${this._field('manufacturer')}${this._field('model')}</div>${this._field('serial_number')}</div></details><section class="editor-section"><h3>${esc(t('setupCodes'))}</h3>${draft.codes.map((code,index) => `<div class="editor-code"><div class="code-title"><select data-field="code-protocol" data-index="${index}" aria-label="${esc(t('protocol'))}" ${this._captureQueue ? 'disabled' : ''}>${PROTOCOLS.map(p => `<option value="${p}" ${code.protocol === p ? 'selected' : ''} ${draft.codes.some((other,i) => i !== index && other.protocol === p) ? 'disabled' : ''}>${protocolNames[p]}</option>`).join('')}</select>${this._iconButton('remove-code',t('removeCode'),'trash',`data-index="${index}"`)}</div><label class="field"><span>${esc(t('codeValue'))}</span><div class="input-secret"><input type="${this._formRevealed.has(code.id) ? 'text' : 'password'}" data-field="code-value" data-focus="code-${index}" data-index="${index}" value="${esc(code.value)}" autocomplete="off" spellcheck="false" maxlength="4096">${this._iconButton('form-reveal',t(this._formRevealed.has(code.id) ? 'hide' : 'reveal'),'eye',`data-index="${index}"`)}</div></label><div class="code-tools">${this._button('code-scan',t(this._canLiveScan() ? (code.value ? 'rescan' : 'scan') : 'takePhoto'),'camera','text',`data-protocol="${code.protocol}"`)}${this._button('code-photo',t('photo'),'image','text',`data-protocol="${code.protocol}"`)}</div><label class="field"><span>${esc(t('codeLabel'))}</span><input type="text" data-field="code-label" data-focus="label-${index}" data-index="${index}" value="${esc(code.label)}" placeholder="${esc(t('codeLabelPlaceholder'))}" maxlength="256"></label></div>`).join('')}${draft.codes.length < PROTOCOLS.length ? this._button('add-slot',t('addCode'),'plus','text') : ''}</section><section class="editor-section"><h3>Home Assistant</h3><div class="link-box">${draft.links?.length ? draft.links.map((link,index) => `<div class="link-item">${icon('link')}<span>${esc(link.name || this._haDevices.find(d => d.id === link.ha_device_id)?.name || this._devices.find(r => r.links?.some(l => l.ha_device_id === link.ha_device_id))?.name || link.ha_device_id)}${link.active === false ? `<small class="muted" style="display:block">${esc(t('unlinked'))}</small>` : ''}</span>${this._iconButton('remove-link',t('removeLink'),'close',`data-index="${index}"`)}</div>`).join('') : `<p class="muted">${esc(t('noLink'))}</p>`}${this._captureQueue ? '' : this._button('picker',t(draft.links?.length ? 'changeLinks' : 'linkDevice'),'link','text')}<p class="muted">${esc(t('linkLater'))}</p></div></section></form>`;
+    return this._modalFrame(t(draft.id ? 'editTitle' : 'addTitle'),body,this._button('close-modal',t(this._captureQueue ? 'endCapture' : 'cancel'))+(this._captureQueue ? this._button('capture-skip',t('skipCapture')) : '')+`<button type="submit" form="record-form" class="button primary" ${this._busy ? 'disabled' : ''}>${this._busy && !this._readingPhoto ? '<span class="spinner"></span>' : ''}${esc(t(this._busy && !this._readingPhoto ? 'saving' : this._captureQueue ? 'saveNext' : 'save'))}</button>`);
   }
   _pickerRecords(device) { return this._devices.filter(record => (device.record_ids || []).includes(record.id) || record.links?.some(link => link.ha_device_id === device.id)); }
   _pickerMissing(device) { return !this._pickerRecords(device).some(record => hasCode(record,this._activeProtocol)); }
@@ -442,6 +588,7 @@ class SetupCodeManagerPanel extends HTMLElement {
     this._stopCamera();
     const protocol = protocolFrom(value);
     if (!protocol) { this._draftError = this._t('unsupportedQR'); this._openModal('editor'); return; }
+    if (this._captureQueue && protocol !== this._captureQueue.protocol) { this._draftError = this._t('captureWrongProtocol',{expected:protocolNames[this._captureQueue.protocol],actual:protocolNames[protocol]}); this._openModal('editor'); return; }
     this._activeProtocol = protocol; this._detected = protocol; this._dirty = true;
     this._pendingCodes = [{id:uid(),protocol,value,label:''}];
     this._applyPendingCodes();
@@ -483,18 +630,28 @@ class SetupCodeManagerPanel extends HTMLElement {
     record.links = (record.links || []).map(link => ({ha_device_id:link.ha_device_id,...(typeof link.active === 'boolean' ? {active:link.active} : {})}));
     record.name = record.name.trim();
     record.codes = record.codes.filter(code => code.value?.trim()).map(({id,protocol,value,label}) => ({id,protocol,value:value.trim(),label}));
+    if (this._captureQueue && (record.id !== this._captureQueue.ids[this._captureQueue.index] || !hasCode(record,this._captureQueue.protocol))) { this._draftError = this._t('captureCodeRequired',{protocol:protocolNames[this._captureQueue.protocol]}); this._openModal('editor'); return; }
     if (!record.name) { this._draftError = this._t('validationError'); this._openModal('editor'); return; }
     if (!ignoreDuplicates) {
       const matches = this._devices.filter(other => other.id !== record.id && recordCodes(other).some(code => record.codes.some(incoming => incoming.protocol === code.protocol && incoming.value === code.value)));
       if (matches.length) { this._openModal('duplicate',{names:matches.map(item => item.name)}); return; }
     }
+    const generation = this._dialogGeneration, draft = this._draft, queue = this._captureQueue || null;
     this._busy = true; this._modal = {kind:'editor'}; this._renderModal();
     try {
       const result = await this._api('save',{record,expected_revision:this._baseRevision});
+      if (generation !== this._dialogGeneration || draft !== this._draft) return;
       this._busy = false; this._dirty = false;
       this._selectedId = result.id || result.record?.id || record.id;
-      this._closeModal(true); await this._refresh(false); this._toast(this._t('saved'));
+      this._closeModal(true,!!queue); const closedGeneration = this._dialogGeneration; this._busy = true;
+      const refreshed = await this._refresh(false);
+      if (closedGeneration !== this._dialogGeneration || (this._captureQueue || null) !== queue) return;
+      this._busy = false;
+      if (queue && !refreshed) { this._captureQueue = null; this._renderMain(); this._toast(this._t('captureRefreshFailed')); }
+      else if (queue) { queue.index++; queue.saved++; this._openCaptureStep(); }
+      else { this._renderMain(); this._toast(this._t('saved')); }
     } catch (error) {
+      if (generation !== this._dialogGeneration || draft !== this._draft) return;
       this._busy = false; this._draftError = this._errorText(error); this._draftErrorCode = error?.code || '';
       this._modal = {kind:'editor'}; this._renderModal();
     }
@@ -514,16 +671,85 @@ class SetupCodeManagerPanel extends HTMLElement {
       this._busy = false; this._selectedId = null; this._closeModal(true); await this._refresh(false); this._toast(this._t('deleted'));
     } catch (error) { this._busy = false; this._modalError = this._errorText(error); this._renderModal(); }
   }
+  _openExport(scope = 'all') {
+    this._closeFilters(); this._dialogGeneration++; this._exportFormat = 'json'; this._exportScope = scope;
+    this._exportScopes = {all:null,visible:this._visibleDevices().map(record => record.id),selected:this._selectionRecords().map(record => record.id)};
+    this._openModal('export');
+  }
+  _renderExport() {
+    const t = this._t;
+    const scopes = [['all',t('exportScope'),this._devices.length],['visible',t('exportFiltered'),this._exportScopes.visible.length],['selected',t('exportSelected'),this._exportScopes.selected.length]];
+    const body = `<fieldset class="scope-options"><legend>${esc(t('exportWhich'))}</legend>${scopes.map(([value,label,count]) => `<label class="check-label"><input type="radio" name="export-scope" data-field="export-scope" value="${value}" ${this._exportScope === value ? 'checked' : ''} ${!count ? 'disabled' : ''}>${esc(label)} <span class="count">${count}</span></label>`).join('')}</fieldset><div class="export-options">${[['json','jsonBackup','JSON'],['csv','tableFormat','CSV']].map(([format,label,description]) => `<label class="export-option"><input type="radio" name="export-format" data-field="export-format" value="${format}" ${(this._exportFormat || 'json') === format ? 'checked' : ''}><div><strong>${esc(t(label))}</strong><small>${description}</small></div></label>`).join('')}</div><p class="small">${esc(t('exportHint'))}</p>${this._notice(t('exportWarning'),'warning')}`;
+    const valid = this._exportScope === 'all' || this._exportScopes[this._exportScope]?.length;
+    return this._modalFrame(t('exportTitle'),body,this._button('close-modal',t('cancel'))+this._button('download-export',t(this._busy ? 'exporting' : 'export'),'upload','primary',valid ? '' : 'disabled'));
+  }
+  _openPrint(records) {
+    this._closeFilters();
+    if (!records?.length || records.length > MAX_PRINT_RECORDS) { this._toast(this._t('printLimit',{count:MAX_PRINT_RECORDS})); return; }
+    this._printRecords = clone(records); this._printNotes = false; this._openModal('print');
+  }
+  _renderPrint() {
+    const t = this._t;
+    return this._modalFrame(t('printCards'),`<p>${esc(t('printScope',{count:this._printRecords.length}))}</p><p class="small muted">${esc(this._printRecords.map(record => record.name).join(', '))}</p><label class="check-label"><input type="checkbox" data-field="print-notes" ${this._printNotes ? 'checked' : ''}>${esc(t('printNotes'))}</label><p class="small">${esc(t('printHint'))}</p>${this._notice(t('printWarning'),'warning')}`,this._button('close-modal',t('cancel'))+this._button('print-confirm',t('openPrint'),'print','primary'));
+  }
+  async _print() {
+    if (this._busy || !this._printRecords?.length) return;
+    const generation = this._dialogGeneration, modal = this._modal, records = this._printRecords;
+    this._busy = true;
+    // Keep this call in the original confirmation click, before any await.
+    const pending = printDeviceCards(this._printRecords,{language:this._hass?.language,includeNotes:this._printNotes});
+    this._renderModal();
+    const result = await pending;
+    if (generation !== this._dialogGeneration || modal !== this._modal || records !== this._printRecords) return;
+    this._busy = false;
+    if (result.status === 'blocked' || result.status === 'error') { this._modalError = this._t(result.status === 'blocked' ? 'printBlocked' : 'printFailed'); this._renderModal(); }
+    else this._closeModal(true);
+  }
+  _captureCandidates(protocol) {
+    return filterRecords(this._devices,{...this._viewSettings(),protocol:'',codeStatus:'all',query:this._query},this._hass?.language).filter(record => !record.archived && !hasCode(record,protocol));
+  }
+  _renderCaptureSetup() {
+    const t = this._t, count = this._captureCandidates(this._captureProtocol).length;
+    return this._modalFrame(t('captureMissing'),`<p>${esc(t('captureIntro'))}</p>${this._selectField('capture-protocol',t('protocol'),PROTOCOLS.map(p => [p,protocolNames[p]]),this._captureProtocol)}<p role="status">${esc(t('captureCandidateCount',{count,protocol:protocolNames[this._captureProtocol]}))}</p><p class="small muted">${esc(t('captureScopeHint'))}</p>`,this._button('close-modal',t('cancel'))+this._button('capture-begin',t('beginCapture'),'camera','primary',count ? '' : 'disabled'));
+  }
+  _startCaptureQueue() {
+    const ids = this._captureCandidates(this._captureProtocol).map(record => record.id);
+    if (!ids.length) return;
+    this._captureQueue = {ids,index:0,saved:0,skipped:0,protocol:this._captureProtocol};
+    this._openCaptureStep();
+  }
+  _openCaptureStep() {
+    const queue = this._captureQueue;
+    if (!queue) return;
+    while (queue.index < queue.ids.length) {
+      const record = this._devices.find(item => item.id === queue.ids[queue.index]);
+      if (record && !record.archived && !hasCode(record,queue.protocol)) {
+        this._selectedId = null; this._newDraft(record); this._activeProtocol = queue.protocol; this._addSlot(queue.protocol); this._dirty = false; this._openModal('editor'); return;
+      }
+      queue.index++; queue.skipped++;
+    }
+    this._captureQueue = null; this._closeModal(true); this._selectedId = null; this._renderMain();
+    this._toast(this._t('captureFinished',{saved:queue.saved,skipped:queue.skipped}));
+  }
+  _skipCapture() {
+    if (!this._captureQueue || this._busy) return;
+    if (this._dirty && !window.confirm(this._t('discard'))) return;
+    this._closeModal(true,true); this._captureQueue.index++; this._captureQueue.skipped++; this._openCaptureStep();
+  }
   async _export() {
+    const generation = this._dialogGeneration, modal = this._modal;
     this._busy = true; this._renderModal();
     try {
-      const result = await this._api('export',{format:this._exportFormat || 'json'});
+      const ids = this._exportScope === 'all' ? null : this._exportScopes?.[this._exportScope];
+      if (this._exportScope !== 'all' && !ids?.length) throw {code:'empty_selection'};
+      const result = await this._api('export',{format:this._exportFormat || 'json',...(ids ? {record_ids:ids} : {})});
+      if (generation !== this._dialogGeneration || modal !== this._modal) return;
       const blob = new Blob([result.content],{type:result.mime});
       const url = URL.createObjectURL(blob); const link = document.createElement('a');
       link.href = url; link.download = result.filename; document.body.appendChild(link); link.click(); link.remove();
       setTimeout(() => URL.revokeObjectURL(url),1000);
       this._busy = false; this._closeModal(true);
-    } catch (error) { this._busy = false; this._modalError = this._errorText(error,'saveFailed'); this._renderModal(); }
+    } catch (error) { if (generation !== this._dialogGeneration || modal !== this._modal) return; this._busy = false; this._modalError = this._t(error?.code === 'not_found' ? 'selectionExpired' : error?.code === 'empty_selection' ? 'selectionEmpty' : 'saveFailed'); this._renderModal(); }
   }
   _chooseImport() {
     const generation = this._dialogGeneration;
@@ -573,7 +799,8 @@ class SetupCodeManagerPanel extends HTMLElement {
   _onInput(event) {
     const el = event.target; const field = el.dataset.field;
     if (['name','location'].includes(field) && this._identityManaged()) return;
-    if (field === 'search') { this._query = el.value; this._renderMain(); }
+    if (field === 'search') { this._query = el.value; this._selection.clear(); this._renderMain(); }
+    else if (field === 'view-name') this._viewName = el.value;
     else if (field === 'picker-search') { this._pickerQuery = el.value; this._renderModal(); }
     else if (this._draft && ['name','location','manufacturer','model','serial_number','notes'].includes(field)) { this._draft[field] = el.value; this._dirty = true; }
     else if (this._draft && ['code-value','code-label'].includes(field)) {
@@ -583,9 +810,13 @@ class SetupCodeManagerPanel extends HTMLElement {
   }
   _onChange(event) {
     const el = event.target; const field = el.dataset.field;
-    if (field === 'protocol-filter') { this._protocol = el.value; this._renderMain(); }
-    else if (field === 'code-status-filter') { this._codeStatusFilter = el.value; this._renderMain(); }
-    else if (field === 'room-filter') { this._room = el.value; this._renderMain(); }
+    const filters = {'protocol-filter':'_protocol','code-status-filter':'_codeStatusFilter','room-filter':'_room','floor-filter':'_floor','label-filter':'_label','sort-filter':'_sort','group-filter':'_group'};
+    if (filters[field]) { this[filters[field]] = el.value; if (!['sort-filter','group-filter'].includes(field)) this._selection.clear(); this._renderMain(); }
+    else if (field === 'saved-view') this._applyView(el.value);
+    else if (field === 'record-selection') { el.checked ? this._selection.add(el.dataset.id) : this._selection.delete(el.dataset.id); this._renderMain(); }
+    else if (field === 'export-scope') { this._exportScope = el.value; this._renderModal(); }
+    else if (field === 'print-notes') this._printNotes = el.checked;
+    else if (field === 'capture-protocol') { this._captureProtocol = el.value; this._renderModal(); }
     else if (field === 'code-protocol' && this._draft) { this._draft.codes[Number(el.dataset.index)].protocol = el.value; this._activeProtocol = el.value; this._dirty = true; this._renderModal(); }
     else if (field === 'export-format') this._exportFormat = el.value;
     else if (field === 'import-choice') { this._decisions[el.dataset.key] = el.checked ? 'add' : 'skip'; this._renderModal(); }
@@ -595,6 +826,7 @@ class SetupCodeManagerPanel extends HTMLElement {
     const button = event.target.closest?.('[data-action]');
     if (!button || button.disabled || this._busyBlocks(button.dataset.action)) return;
     const action = button.dataset.action;
+    if (action === 'ignore-selection') return;
     const id = button.dataset.id;
     const record = this._devices.find(item => item.id === (id || this._selectedId));
     const code = record?.codes?.find(item => item.id === button.dataset.code);
@@ -602,9 +834,26 @@ class SetupCodeManagerPanel extends HTMLElement {
       if (action === 'ha-menu') this.dispatchEvent(new CustomEvent('hass-toggle-menu',{bubbles:true,composed:true}));
       else if (action === 'refresh') await this._refresh();
       else if (action === 'refresh-menu') { this._closeModal(true); await this._refresh(); }
-      else if (action === 'tab') { this._tab = button.dataset.tab; this._selectedId = null; this._renderMain(); }
-      else if (action === 'reset-filters') { this._query = ''; this._protocol = ''; this._codeStatusFilter = 'all'; this._room = ''; this._renderMain(); this.shadowRoot.querySelector('[data-field="search"]')?.focus({ preventScroll:true }); }
-      else if (action === 'select') { this._selectedId = id; this._revealed.clear(); this._revealedManual.clear(); this._renderMain(); this.scrollIntoView({block:'start',behavior:'instant'}); this.shadowRoot.querySelector('.detail-heading h2')?.setAttribute('tabindex','-1'); this.shadowRoot.querySelector('.detail-heading h2')?.focus({preventScroll:true}); }
+      else if (action === 'tab') { this._closeFilters(); this._tab = button.dataset.tab; this._selectedId = null; this._selection.clear(); this._activeViewId = ''; this._renderMain(); }
+      else if (action === 'toggle-filters') { if (this._filtersOpen) this._closeFilters(true); else { this._filtersOpen = true; this._renderMain(); this.shadowRoot.querySelector('[data-field="room-filter"]')?.focus({preventScroll:true}); } }
+      else if (action === 'close-filters') this._closeFilters(true);
+      else if (action === 'reset-filters') this._resetFilters();
+      else if (action === 'remove-filter') { const fields = {room:'_room',floor:'_floor',label:'_label',protocol:'_protocol',status:'_codeStatusFilter'}; const field = fields[button.dataset.filter]; if (field) { this[field] = field === '_codeStatusFilter' ? 'all' : ''; this._selection.clear(); this._renderMain(); this.shadowRoot.querySelector('[data-action="toggle-filters"]')?.focus({preventScroll:true}); } }
+      else if (action === 'save-view') this._saveView();
+      else if (action === 'delete-view') this._deleteView();
+      else if (action === 'toggle-group') { const key = button.dataset.group; this._collapsedGroups.has(key) ? this._collapsedGroups.delete(key) : this._collapsedGroups.add(key); this._renderMain(); }
+      else if (action === 'toggle-selection') { this._selecting = !this._selecting; this._selection.clear(); this._renderMain(); }
+      else if (action === 'toggle-record') { this._selection.has(id) ? this._selection.delete(id) : this._selection.add(id); this._renderMain(); }
+      else if (action === 'select-results') { const rows = this._visibleDevices(); if (rows.every(item => this._selection.has(item.id))) this._selection.clear(); else this._selection = new Set(rows.map(item => item.id)); this._renderMain(); }
+      else if (action === 'export-selected') this._openExport('selected');
+      else if (action === 'print-selected') this._openPrint(this._selectionRecords());
+      else if (action === 'print-filtered') this._openPrint(this._visibleDevices());
+      else if (action === 'print-record' && record) this._openPrint([record]);
+      else if (action === 'print-confirm') await this._print();
+      else if (action === 'capture-start') { this._captureProtocol = this._protocol || 'matter'; this._openModal('capture-setup'); }
+      else if (action === 'capture-begin') this._startCaptureQueue();
+      else if (action === 'capture-skip') this._skipCapture();
+      else if (action === 'select') { this._closeFilters(); this._selectedId = id; this._revealed.clear(); this._revealedManual.clear(); this._renderMain(); this.scrollIntoView({block:'start',behavior:'instant'}); this.shadowRoot.querySelector('.detail-heading h2')?.setAttribute('tabindex','-1'); this.shadowRoot.querySelector('.detail-heading h2')?.focus({preventScroll:true}); }
       else if (action === 'close-details') this._closeDetails();
       else if (action === 'menu') this._openModal('menu');
       else if (action === 'add') { this._newDraft(); this._openModal('start'); }
@@ -650,7 +899,7 @@ class SetupCodeManagerPanel extends HTMLElement {
       else if (action === 'keep-draft') { this._baseRevision = this._modal.revision; this._baseRecord = clone(this._modal.current); this._draftError = ''; this._draftErrorCode = ''; this._openModal('editor'); }
       else if (action === 'save-as-new') { delete this._draft.id; this._draft.links = []; this._baseRevision = this._modal.revision; this._baseRecord = blankRecord(); this._draftError = ''; this._draftErrorCode = ''; this._openModal('editor'); }
       else if (action === 'unlink-save') { this._draft.links = []; this._dirty = true; this._draftError = ''; this._draftErrorCode = ''; this._openModal('editor'); await this._save(); }
-      else if (action === 'export') { this._dialogGeneration++; this._exportFormat = 'json'; this._openModal('export'); }
+      else if (action === 'export') this._openExport();
       else if (action === 'download-export') await this._export();
       else if (action === 'import') { this._dialogGeneration++; this._openModal('import'); }
       else if (action === 'pick-import') this._chooseImport();

@@ -85,8 +85,13 @@ async def ws_archive(manager, connection, msg):
     await manager.async_archive(msg["record_id"], msg["archived"], msg["expected_revision"])
 
 
-@_endpoint("export", {vol.Required("format"): vol.In(("json", "csv"))})
+@_endpoint(
+    "export",
+    {vol.Required("format"): vol.In(("json", "csv")), vol.Optional("record_ids"): [str]},
+)
 async def ws_export(manager, connection, msg):
+    if "record_ids" in msg:
+        return manager.export(msg["format"], msg["record_ids"])
     return manager.export(msg["format"])
 
 

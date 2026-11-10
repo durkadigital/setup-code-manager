@@ -1,13 +1,53 @@
 # Teststand und praktische Abnahme
 
-Dieser Teststand trennt die lokalen Prüfungen der jeweiligen Betas von der
-praktischen Abnahme im Zielsystem. **0.1.0b7** ergänzt die Codesuche, Notizsuche
-und kombinierbare Filter. **0.1.0b6** wurde zuvor auf HA Core 2026.11.1 installiert,
-Home Assistant neu gestartet und die bereinigte Geräteübersicht geprüft.
+Dieser Teststand trennt lokale Prüfungen von Veröffentlichung und praktischer
+Abnahme. **0.1.0b8** ergänzt das Filter-Dropdown und die Inventarwerkzeuge.
+**0.1.0b7** wurde auf HA Core 2026.11.1 installiert und nach Neustart mit
+Codesuche, kombinierten Raum-/Protokoll-/Statusfiltern und Datenerhalt geprüft.
 Automatisierte Prüfungen verwenden synthetische Daten. Zusätzlich wurden ein
 reales QR-Foto lokal und die Fotoaufnahme auf dem Ziel-iPhone geprüft.
 Private Fotos und Codeinhalte werden nicht im Repository dokumentiert.
 Die vollständige praktische Abnahme steht aus.
+
+## Lokale Abschlussprüfung von 0.1.0b8 am 10. November 2026
+
+- **319 Python-Tests** und **196 JavaScript-Tests** bestanden; Ruff-Code-, Format-
+  und Whitespaceprüfung bestanden.
+- Isolierter echter HA-Core-Lauf: **14 Prüfungen**, alle **10** versionierten
+  Web-Dateien mit HTTP 200 erreichbar, keine Integrationsfehler. Adminschutz,
+  ausgewählter JSON-/CSV-Export, Ablehnung entfernter IDs und Rechteprüfung auch
+  bei ausgewählten IDs bestanden.
+- Backendtests prüfen aktuelle HA-Bereiche, Etagen und direkte Gerätelabels,
+  Aktualisierung durch Registry-Ereignisse und rein abgeleitete Metadaten.
+  Die Daten erscheinen weder dauerhaft im Store noch im Austauschformat.
+- Browserprüfung mit synthetischen Daten bei Desktopbreite und **390 × 844 Pixeln**:
+  Filter öffnen/schließen, sichtbare aktive Bedingungen, aufklappbare weitere Filter,
+  Etage plus Label, Sortierung, Raumgruppen und deren Ein-/Ausklappen.
+  Dropdown bleibt im sichtbaren Fenster; mobil kein horizontales Überlaufen.
+- Gespeicherte Ansicht nach Neuladen angewendet. Unit-Tests prüfen Isolation pro
+  HA-Instanz/Konto, defekten/gesperrten Browser-Speicher und fehlende Geheimnisse
+  oder Suchtexte in gespeicherten Auswahlwerten.
+- Auswahl-Export im Browser heruntergeladen und geprüft: genau der eine markierte
+  synthetische Eintrag. Serverseitige JSON-/CSV-Roundtrips prüfen zusätzlich
+  Teilbestände einschließlich Archiv und unveränderte Inventardaten.
+- Geführte Erfassung im Browser: unberührten Schritt überspringen, synthetischen
+  Matter-Code speichern und erst danach den nächsten Eintrag öffnen. Regressionen
+  prüfen falsche QR-Familie, Save-/Refreshfehler und Antworten nach erneutem Verbinden.
+- Ein reproduzierter Race zwischen der Aktualisierung nach dem Speichern und einem
+  automatischen Update ist abgesichert: überholte Abfragen warten auf die neueste
+  laufende Abfrage, unabhängig von der Antwortreihenfolge.
+- Druck: Bestätigung und Notiz-Opt-in im Browser geprüft; dieselbe generierte
+  Dokumentansicht mit synthetischen Daten am Desktop und mobil gerendert. Original-
+  QR und abgeleiteter Matter-Code sind getrennt dargestellt. Tests lesen die
+  generierten Matter-, HomeKit- und Z-Wave-QRs mit dem echten Decoder zurück und
+  prüfen lokale Ressourcen, sichere Texte und den Lebenszyklus des Druckfensters.
+- Keine Anwendungsfehler in der lokalen Browserkonsole. Screenshots enthalten nur
+  Beispieldaten; echte Gerätecodes oder private Betriebshinweise werden nicht veröffentlicht.
+
+Dieser Stand ist lokal geprüft. Die Installation von Beta 8 im Zielsystem und ein
+physischer Druck beziehungsweise PDF-Export im tatsächlichen Zielbrowser sind
+getrennte Abnahmen. iPhone-Livekamera und vollständiger HA-Restore bleiben offen.
+[Versionshinweise](releases/0.1.0b8.md) · [Bedienung](USAGE.de.md).
 
 ## Abschlussprüfung von 0.1.0b7 am 10. November 2026
 

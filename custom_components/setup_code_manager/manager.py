@@ -15,14 +15,17 @@ from uuid import uuid4
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import floor_registry as fr
+from homeassistant.helpers import label_registry as lr
 from homeassistant.helpers.debounce import Debouncer
 
 from .const import EVENT_UPDATED, REFRESH_COOLDOWN
-from .inventory import RECORD_FIELDS, new_record, validate_record
+from .inventory import MAX_RECORDS, RECORD_FIELDS, _identifier, new_record, validate_record
 from .protocols import registry_devices, scan_all
 from .status import (
     device_identity,
     device_is_available,
+    device_organization,
     device_protocols,
     linked_identity,
     serialize_record,
@@ -64,7 +67,12 @@ class SetupCodesManager:
         self._debouncer = Debouncer(
             self.hass, _LOGGER, cooldown=REFRESH_COOLDOWN, immediate=False, function=self.async_sync
         )
-        for event in (dr.EVENT_DEVICE_REGISTRY_UPDATED, ar.EVENT_AREA_REGISTRY_UPDATED):
+        for event in (
+            dr.EVENT_DEVICE_REGISTRY_UPDATED,
+            ar.EVENT_AREA_REGISTRY_UPDATED,
+            fr.EVENT_FLOOR_REGISTRY_UPDATED,
+            lr.EVENT_LABEL_REGISTRY_UPDATED,
+        ):
             self._unsubs.append(self.hass.bus.async_listen(event, self._on_registry))
 
     @callback
@@ -150,6 +158,7 @@ class SetupCodesManager:
                 {
                     "id": device.id,
                     **device_identity(self.hass, device),
+                    **device_organization(self.hass, device),
                     "manufacturer": device.manufacturer or "",
                     "model": device.model or "",
                     "serial_number": device.serial_number or "",
@@ -273,7 +282,7 @@ class SetupCodesManager:
                     {
                         k: v
                         for k, v in link.items()
-                        if k not in {"active", "name", "location", "available"}
+                        if k not in {"active", "name", "location", "available", "areas", "labels"}
                     }
                     if isinstance(link, dict)
                     else link
@@ -334,11 +343,28 @@ class SetupCodesManager:
             )
             await self._commit(data)
 
-    def export(self, format: str) -> dict[str, str]:
+    def export(self, format: str, record_ids: list[str] | None = None) -> dict[str, Any]:
+        """Export all records, or an exact nonempty selection without changing data."""
+        data = self.store.data
+        selected = record_ids is not None
+        if selected:
+            if not isinstance(record_ids, list) or not 1 <= len(record_ids) <= MAX_RECORDS:
+                raise ValueError("Invalid export selection.")
+            requested = {_identifier(record_id, "record ID") for record_id in record_ids}
+            if len(requested) != len(record_ids):
+                raise ValueError("Duplicate record IDs in export selection.")
+            if requested - {record["id"] for record in data["devices"]}:
+                raise InventoryError("not_found")
+            data["devices"] = [record for record in data["devices"] if record["id"] in requested]
         return {
-            "content": export_data(format, self.store.data),
-            "filename": f"setup-code-manager-{datetime.now(UTC):%Y-%m-%d}.{format}",
+            "content": export_data(format, data),
+            "filename": (
+                f"setup-code-manager-{'selected-' if selected else ''}"
+                f"{datetime.now(UTC):%Y-%m-%d}.{format}"
+            ),
             "mime": "application/json" if format == "json" else "text/csv;charset=utf-8",
+            "count": len(data["devices"]),
+            "scope": "selected" if selected else "all",
         }
 
     def _read_legacy(self) -> str:

@@ -11,6 +11,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import floor_registry as fr
+from homeassistant.helpers import label_registry as lr
 
 from custom_components.setup_code_manager.inventory import new_record
 from custom_components.setup_code_manager.manager import InventoryError, SetupCodesManager
@@ -23,6 +25,8 @@ async def manager(tmp_path):
     hass = HomeAssistant(str(tmp_path))
     hass.config_entries = ConfigEntries(hass, {})
     await hass.config_entries.async_initialize()
+    await fr.async_load(hass)
+    await lr.async_load(hass)
     await ar.async_load(hass)
     dr.async_setup(hass)
     await dr.async_load(hass)
@@ -597,4 +601,132 @@ async def test_ha_identity_is_bounded_and_unknown_link_fields_remain_rejected(ma
     before = manager.store.data
     with pytest.raises(InventoryError, match="validation_error"):
         await manager.async_save(saved, revision(manager))
+    assert manager.store.data == before
+
+
+@pytest.mark.parametrize("format", ["json", "csv"])
+async def test_selected_export_is_exact_including_archive_and_preserves_roundtrip(manager, format):
+    device = add_device(manager)
+    await manager.async_sync()
+    linked = manager.store.devices[0]
+    archived = await manager.async_save(
+        new_record("Archived card", codes=[{"protocol": "homekit", "value": "03145154"}]),
+        revision(manager),
+    )
+    await manager.async_archive(archived["id"], True, revision(manager))
+    await manager.async_save(new_record("Not selected"), revision(manager))
+    before = manager.store.data
+    exported = manager.export(format, [archived["id"], linked["id"]])
+    expected = [r for r in before["devices"] if r["id"] != before["devices"][-1]["id"]]
+    assert parse_import(format, exported["content"], before["instance_id"]) == expected
+    assert exported["count"] == 2
+    assert exported["scope"] == "selected"
+    assert "-selected-" in exported["filename"]
+    assert expected[0]["links"] == [{"ha_device_id": device.id}]
+    assert expected[1]["archived"]
+    assert manager.store.data == before
+    if format == "json":
+        envelope = json.loads(exported["content"])
+        assert envelope["instance_id"] == before["instance_id"]
+        assert envelope["revision"] == before["revision"]
+    assert manager.export(format)["scope"] == "all"
+    assert manager.export(format)["count"] == 3
+
+
+@pytest.mark.parametrize("selection", [[], "record", [True], [123], [None], [""], ["a", "a"]])
+async def test_invalid_export_selection_is_rejected_without_mutation(manager, selection):
+    await manager.async_save(new_record("Existing", id="a"), revision(manager))
+    before = manager.store.data
+    with pytest.raises(ValueError):
+        manager.export("json", selection)
+    assert manager.store.data == before
+
+
+@pytest.mark.parametrize("format", ["json", "csv"])
+async def test_removed_export_selection_rejects_entire_export_not_silent_subset(manager, format):
+    await manager.async_save(new_record("Existing", id="a"), revision(manager))
+    before = manager.store.data
+    with pytest.raises(InventoryError, match="not_found"):
+        manager.export(format, ["a", "removed"])
+    assert manager.store.data == before
+
+
+async def test_live_area_floor_and_direct_device_labels_are_derived_not_persisted(manager):
+    floor = fr.async_get(manager.hass).async_create("Upstairs")
+    label = lr.async_get(manager.hass).async_create("Child device")
+    area_label = lr.async_get(manager.hass).async_create("Area label only")
+    area = ar.async_get(manager.hass).async_create(
+        "Child room", floor_id=floor.floor_id, labels={area_label.label_id}
+    )
+    device = add_device(manager)
+    dr.async_get(manager.hass).async_update_device(
+        device.id, area_id=area.id, labels={label.label_id}
+    )
+    await manager.async_sync()
+    before = manager.store.data
+    result = manager.list_data()["devices"][0]
+    metadata = {
+        "areas": [
+            {
+                "id": area.id,
+                "name": "Child room",
+                "floor_id": floor.floor_id,
+                "floor_name": "Upstairs",
+            }
+        ],
+        "labels": [{"id": label.label_id, "name": "Child device"}],
+    }
+    for key, value in metadata.items():
+        assert result["links"][0][key] == value
+        assert manager.ha_devices()["devices"][0][key] == value
+    assert manager.store.data == before
+    for format in ("json", "csv"):
+        assert "floor_name" not in manager.export(format)["content"]
+        assert "Child device" not in manager.export(format)["content"]
+    result["links"][0]["areas"][0]["floor_name"] = "Forged floor"
+    result["links"][0]["labels"] = [{"id": "forged", "name": "Forged label"}]
+    saved = await manager.async_save(result, revision(manager))
+    assert saved["links"][0]["areas"] == metadata["areas"]
+    assert saved["links"][0]["labels"] == metadata["labels"]
+    assert manager.store.devices[0]["links"] == [{"ha_device_id": device.id}]
+
+
+async def test_floor_label_renames_and_removal_update_live_metadata(manager):
+    floor = fr.async_get(manager.hass).async_create("Old floor")
+    label = lr.async_get(manager.hass).async_create("Old label")
+    area = ar.async_get(manager.hass).async_create("Room", floor_id=floor.floor_id)
+    device = add_device(manager)
+    registry = dr.async_get(manager.hass)
+    registry.async_update_device(device.id, area_id=area.id, labels={label.label_id})
+    await manager.async_sync()
+    before = manager.store.data
+    fr.async_get(manager.hass).async_update(floor.floor_id, name="New floor")
+    lr.async_get(manager.hass).async_update(label.label_id, name="New label")
+    link = manager.list_data()["devices"][0]["links"][0]
+    assert link["areas"][0]["floor_name"] == "New floor"
+    assert link["labels"][0]["name"] == "New label"
+    # Organization-only changes must not rewrite the durable record.
+    assert manager.store.data == before
+    registry.async_update_device(device.id, area_id=None, labels=set())
+    link = manager.list_data()["devices"][0]["links"][0]
+    assert link["areas"] == [] and link["labels"] == []
+    registry.async_remove_device(device.id)
+    link = manager.list_data()["devices"][0]["links"][0]
+    assert link["active"] is False and link["areas"] == [] and link["labels"] == []
+
+
+async def test_organization_registry_events_refresh_clients_without_persisting_metadata(manager):
+    before = manager.store.data
+    with patch.object(manager._debouncer, "async_schedule_call") as schedule:
+        for event in (
+            ar.EVENT_AREA_REGISTRY_UPDATED,
+            fr.EVENT_FLOOR_REGISTRY_UPDATED,
+            lr.EVENT_LABEL_REGISTRY_UPDATED,
+        ):
+            manager.hass.bus.async_fire(
+                event,
+                {"action": "update", "area_id": "test", "floor_id": "test", "label_id": "test"},
+            )
+        await manager.hass.async_block_till_done()
+    assert schedule.call_count == 3
     assert manager.store.data == before

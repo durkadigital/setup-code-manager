@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { availableRooms, filterRecords, recordRooms } from '../custom_components/setup_code_manager/www/filters.js';
+import { availableRooms, filterRecords, recordRooms, recordFloors, recordLabels, availableFloors, availableLabels, groupRecordsByRoom } from '../custom_components/setup_code_manager/www/filters.js';
 
 // All credentials below are synthetic, with no connection to a real device.
 const MATTER = 'MT:Y.K9042C00KA0648G00';
@@ -240,4 +240,122 @@ test('malformed optional metadata is ignored without inventing searchable string
   assert.deepEqual(ids(records, { query: 'fallback' }), ['malformed']);
   assert.deepEqual(ids([record('bad-collections', { codes: {}, links: 'invalid' })]), ['bad-collections']);
   assert.deepEqual(filterRecords([null, false]), []);
+});
+
+
+test('floor and label metadata comes only from active HA links and uses exact IDs', () => {
+  const linked = record('linked', { links:[
+    { active:true, location:'Office', areas:[{ id:'office', name:'Office', floor_id:'upper', floor_name:'Upper floor' }], labels:[{ id:'work', name:'Work' }] },
+    { active:false, location:'Old room', areas:[{ floor_id:'old-floor', floor_name:'Old floor' }], labels:[{ id:'old-label', name:'Old label' }] },
+    { active:true, areas:[{ floor_id:'upper', floor_name:'Upper floor' }], labels:[{ id:'work', name:'Work' }, { id:'lights', name:'Lights' }] },
+  ] });
+  assert.deepEqual(recordFloors(linked), [{ id:'upper', name:'Upper floor' }]);
+  assert.deepEqual(recordLabels(linked), [{ id:'work', name:'Work' }, { id:'lights', name:'Lights' }]);
+  assert.deepEqual(ids([linked], { floor:'floor:upper', label:'label:work' }), ['linked']);
+  for (const selection of ['floor:Upper floor','floor:up','floor:old-floor']) assert.deepEqual(ids([linked], { floor:selection }), []);
+  for (const selection of ['label:Work','label:wor','label:old-label']) assert.deepEqual(ids([linked], { label:selection }), []);
+});
+
+test('available floor and label options are locale sorted, ID distinct and include archived active links', () => {
+  const records = [
+    record('a', { links:[{ areas:[{ floor_id:'z', floor_name:'Zebra' }, { floor_id:'a', floor_name:'Ärea' }], labels:[{ id:'l2', name:'Same name' }, { id:'l1', name:'Same name' }] }] }),
+    record('b', { archived:true, links:[{ areas:[{ floor_id:'b', floor_name:'Basement' }], labels:[{ id:'archive', name:'Archive label' }, { id:'l1', name:'Same name' }] }] }),
+    record('removed', { links:[{ active:false, areas:[{ floor_id:'old', floor_name:'Removed' }], labels:[{ id:'old', name:'Removed' }] }] }),
+  ];
+  assert.deepEqual(availableFloors(records, 'de').map(item => item.id), ['a','b','z']);
+  assert.deepEqual(availableLabels(records).map(item => item.id), ['archive','l1','l2']);
+});
+
+test('unassigned floor and label match records with no current HA metadata, without stale fallbacks', () => {
+  const records = [
+    record('standalone', { floors:[{ id:'stale', name:'Stale' }], labels:[{ id:'stale', name:'Stale' }] }),
+    record('removed', { links:[{ active:false, areas:[{ floor_id:'old', floor_name:'Old' }], labels:[{ id:'old', name:'Old' }] }] }),
+    record('empty', { links:[{ areas:[], labels:[] }] }),
+    record('assigned', { links:[{ areas:[{ floor_id:'floor-id', floor_name:'Floor' }], labels:[{ id:'label-id', name:'Label' }] }] }),
+  ];
+  assert.deepEqual(ids(records, { floor:'unassigned', label:'unassigned' }), ['empty','removed','standalone']);
+  assert.deepEqual(ids(records, { floor:'floor:floor-id', label:'label:label-id' }), ['assigned']);
+  assert.deepEqual(recordFloors(record('malformed', { links:[{ areas:[null, false, {}, { floor_id:12, floor_name:'Not an ID' }, { floor_id:'deleted', floor_name:'' }], labels:[null, false, { id:'deleted', name:'' }] }] })), []);
+});
+
+test('all structured filters compose with floor and direct device label, including the archive', () => {
+  const area = { id:'office', name:'Office', floor_id:'upstairs', floor_name:'Upstairs' };
+  const match = record('target', { archived:true, notes:'Under base', codes:[code('homekit','11122333')], links:[{ location:'Office', areas:[area], labels:[{ id:'work', name:'Work' }] }] });
+  const other = record('other', { ...match, id:'other', links:[{ location:'Office', areas:[area], labels:[{ id:'different', name:'Different' }] }] });
+  assert.deepEqual(ids([match, other], { tab:'archive', query:'under', room:'room:Office', protocol:'matter', codeStatus:'missing', floor:'floor:upstairs', label:'label:work' }), ['target']);
+  assert.deepEqual(ids([match], { tab:'archive', room:'room:Office', floor:'unassigned' }), []);
+});
+
+test('name sorting has deterministic ID ties and never reorders or alters the source array', () => {
+  const records = [record('z', { name:'Same' }), record('b', { name:'Alpha' }), record('a', { name:'Same' }), record('c', { name:'Zebra' })];
+  const before = structuredClone(records);
+  assert.deepEqual(ids(records), ['b','a','z','c']);
+  assert.deepEqual(ids(records, { sort:'name-desc' }), ['c','a','z','b']);
+  assert.deepEqual(ids(records, { sort:'unknown' }), ['b','a','z','c']);
+  assert.deepEqual(records, before);
+});
+
+test('room sort uses exact current rooms and puts unassigned records last', () => {
+  const records = [
+    record('no-room', { name:'A no room' }),
+    record('z-room', { name:'B', location:'Zebra' }),
+    record('b-room', { name:'Z', location:'Bedroom' }),
+    record('a-room', { name:'Q', location:'Stale', links:[{ location:'Ärea' }] }),
+    record('a-room-tie', { name:'A', location:'Ärea' }),
+  ];
+  assert.deepEqual(ids(records, { sort:'room' }, 'de'), ['a-room-tie','a-room','b-room','z-room','no-room']);
+});
+
+test('last-changed sorting orders valid timestamps newest first and invalid dates last by name', () => {
+  const records = [
+    record('invalid-z', { name:'Z invalid', updated_at:'not-a-date' }),
+    record('old', { name:'Old', updated_at:'2026-11-01T10:00:00+00:00' }),
+    record('new-b', { name:'Latest', updated_at:'2026-11-10T11:00:00+01:00' }),
+    record('new-a', { name:'Latest', updated_at:'2026-11-10T10:00:00Z' }),
+    record('invalid-a', { name:'A invalid', updated_at:123456789 }),
+    record('blank', { name:'B blank' }),
+  ];
+  assert.deepEqual(ids(records, { sort:'updated-desc' }), ['new-a','new-b','old','invalid-a','blank','invalid-z']);
+});
+
+test('missing-first sort is protocol-relative rather than treating another stored family as complete', () => {
+  const records = [
+    record('matter', { name:'A matter', codes:[code('matter', MATTER)] }),
+    record('empty', { name:'Z empty' }),
+    record('homekit', { name:'B homekit', codes:[code('homekit','11122333')] }),
+  ];
+  assert.deepEqual(ids(records, { sort:'missing-first' }), ['empty','matter','homekit']);
+  assert.deepEqual(ids(records, { protocol:'matter', codeStatus:'missing', sort:'missing-first' }), ['homekit','empty']);
+  records[1].protocols = ['matter'];
+  records[2].protocols = ['matter','homekit'];
+  assert.deepEqual(ids(records, { protocol:'matter', sort:'missing-first' }), ['homekit','empty','matter']);
+});
+
+test('room grouping keeps a multi-room entry once and distinguishes a literal slash name', () => {
+  const records = [
+    record('second', { name:'B', location:'Office' }),
+    record('first', { name:'A', location:'Office' }),
+    record('combined', { location:'Office / Workshop', links:[{ location:'Workshop' }, { location:'Office' }, { location:'Office' }] }),
+    record('slash', { location:'Office / Workshop' }),
+    record('unassigned', { location:'' }),
+  ];
+  const before = structuredClone(records);
+  const groups = groupRecordsByRoom(records);
+  assert.deepEqual(groups.map(group => group.roomNames), [['Office'],['Office','Workshop'],['Office / Workshop'],[]]);
+  assert.deepEqual(groups[0].records.map(item => item.id), ['second','first']);
+  assert.notEqual(groups[1].key, groups[2].key);
+  assert.equal(groups.at(-1).key, '');
+  assert.deepEqual(groups.flatMap(group => group.records).map(item => item.id).sort(), records.map(item => item.id).sort());
+  assert.strictEqual(groups[1].records[0], records[2]);
+  assert.deepEqual(records, before);
+  assert.deepEqual(groupRecordsByRoom([null, false]), []);
+});
+
+
+test('floor and label registry IDs are preserved exactly, including long IDs', () => {
+  const floorId = 'f'.repeat(300), labelId = 'l'.repeat(500);
+  const linked = record('long-ids', { links:[{ areas:[{ floor_id:floorId, floor_name:'Floor' }], labels:[{ id:labelId, name:'Label' }] }] });
+  assert.equal(availableFloors([linked])[0].id, floorId);
+  assert.equal(availableLabels([linked])[0].id, labelId);
+  assert.deepEqual(ids([linked],{ floor:`floor:${floorId}`, label:`label:${labelId}` }), ['long-ids']);
 });

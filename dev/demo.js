@@ -6,6 +6,31 @@ const MATTER = 'MT:Y.K9042C00KA0648G00';
 const HOMEKIT = '111-22-333';
 const DSK = '12345-23456-34567-45678-56789-01234-02345-03456';
 const INSTANCE = 'synthetic-local-preview';
+// HA organization is derived for responses and never written into inventory.
+const syntheticAreas = {
+  Wohnzimmer:{id:'demo-living',floor_id:'demo-ground',floor_name:'Erdgeschoss'},
+  Flur:{id:'demo-hall',floor_id:'demo-ground',floor_name:'Erdgeschoss'},
+  Küche:{id:'demo-kitchen',floor_id:'demo-ground',floor_name:'Erdgeschoss'},
+  Arbeitszimmer:{id:'demo-office',floor_id:'demo-upper',floor_name:'Obergeschoss'},
+  Büro:{id:'demo-study',floor_id:'demo-upper',floor_name:'Obergeschoss'},
+  Schlafzimmer:{id:'demo-bedroom',floor_id:'demo-upper',floor_name:'Obergeschoss'},
+};
+const syntheticLabels = {
+  'ha-1':[{id:'demo-energy',name:'Energie'}],
+  'ha-2':[{id:'demo-lighting',name:'Beleuchtung'}],
+  'ha-3':[{id:'demo-security',name:'Sicherheit'}],
+  'ha-4':[{id:'demo-climate',name:'Raumklima'}],
+  'ha-5':[{id:'demo-energy',name:'Energie'}],
+  'ha-6':[{id:'demo-lighting',name:'Beleuchtung'}],
+  'ha-9':[{id:'demo-lighting',name:'Beleuchtung'}],
+};
+const organizationFromHA = device => ({
+  areas:device.location ? [{name:device.location,...(syntheticAreas[device.location] || {
+    id:`demo-area-${device.location.toLowerCase().normalize('NFKD').replace(/\p{Diacritic}/gu,'').replace(/[^a-z0-9]+/g,'_') || 'other'}`,
+    floor_id:'',floor_name:'',
+  })}] : [],
+  labels:copy(syntheticLabels[device.id] || []),
+});
 const fields = ['id','name','manufacturer','model','serial_number','location','notes','archived','created_at','updated_at','links','source_refs'];
 const csvFields = ['format','schema_version','instance_id','revision','row_type',...fields,'code_id','protocol','value','label'];
 const code = (id,protocol,value) => ({id,protocol,value,label:'Originalcode'});
@@ -59,16 +84,16 @@ const updateHADevice = (id,changes) => {
   Object.assign(device,changes);syncIdentities();revision++;emit();return true;
 };
 const decorated = data => data.map(item => {
-  const links = item.links.map(link => {const ha = haDevices.find(d => d.id === link.ha_device_id);return {...link,active:!!ha,name:ha?.name || item.name,location:ha ? ha.location : item.location,available:ha?.available};});
+  const links = item.links.map(link => {const ha = haDevices.find(d => d.id === link.ha_device_id);return {...link,active:!!ha,name:ha?.name || '',location:ha?.location || '',available:!!ha && ha.available,...(ha ? organizationFromHA(ha) : {areas:[],labels:[]})};});
   // Only this known synthetic payload has a precomputed manual equivalent.
   const codes = item.codes.map(c => ({...storedCode(c),...(c.protocol === 'matter' && c.value === MATTER ? {manual_value:'34970112332'} : {})}));
   return {...copy(item),...identityFromHA(item),codes,links,linked:links.some(link => link.active),available:links.some(link => link.active && link.available),protocols:[...new Set([...item.codes.map(c => c.protocol),...links.flatMap(link => haDevices.find(d => d.id === link.ha_device_id)?.protocols || [])])]};
 });
 const csvCell = value => `"${String(value ?? '').replaceAll('"','""')}"`;
-const exportCSV = () => {
+const exportCSV = (records = devices) => {
   const base = {format:'setup-code-manager',schema_version:'1',instance_id:INSTANCE,revision:String(revision)};
   const rows = [{...base,row_type:'metadata'}];
-  for (const item of devices) {
+  for (const item of records) {
     const common = {...base,...item,archived:String(item.archived),links:JSON.stringify(item.links),source_refs:JSON.stringify(item.source_refs)};
     if (!item.codes.length) rows.push({...common,row_type:'record'});
     for (const c of item.codes) rows.push({...common,row_type:'code',code_id:c.id,protocol:c.protocol,value:c.value,label:c.label});
@@ -98,11 +123,11 @@ const parseCSV = content => {
 const canonical = data => JSON.stringify(Object.fromEntries([...fields,'codes'].filter(key => !['created_at','updated_at'].includes(key)).map(key => [key,data[key]])));
 const legacy = () => [copy(initial[0]),copy(initial[2]),{...copy(initial[4]),codes:[code('c-5','zwave','23456-23456-34567-45678-56789-01234-02345-03456')]},record('legacy-1','Leselampe Bett','Schlafzimmer','IKEA','KAJPLATS',[code('lc-1','matter',MATTER)]),record('legacy-2','Türsensor Keller','Keller','Aeotec','Sensor',[code('lc-2','zwave',DSK)]),record('legacy-3','Tischleuchte','Büro','Nanoleaf','Essentials',[code('lc-3','homekit',HOMEKIT)])];
 async function callWS(message) {
-  // No fetch, WebSocket, disk, localStorage, or service worker: these examples live only in memory.
+  // Inventory examples remain in memory; the panel may remember view settings separately.
   await new Promise(resolve => setTimeout(resolve,120));
   const command = message.type.replace('setup_code_manager/','');
   if(command === 'list') return {devices:decorated(devices),revision,instance_id:INSTANCE,legacy_available:true};
-  if(command === 'ha_devices') return {devices:haDevices.map(device=>({...copy(device),record_ids:devices.filter(record=>record.links.some(link=>link.ha_device_id === device.id)).map(record=>record.id)}))};
+  if(command === 'ha_devices') return {devices:haDevices.map(device=>({...copy(device),...organizationFromHA(device),record_ids:devices.filter(record=>record.links.some(link=>link.ha_device_id === device.id)).map(record=>record.id)}))};
   if(command === 'save') {
     ensureRevision(message.expected_revision);
     const draft=copy(message.record);const old=devices.find(item=>item.id === draft.id);
@@ -124,7 +149,19 @@ async function callWS(message) {
     if(command === 'delete') devices=devices.filter(item=>item !== found);else {found.archived=message.archived;found.updated_at=now();}
     revision++;emit();return {};
   }
-  if(command === 'export') return {filename:`setup-code-manager-DEMO.${message.format}`,mime:message.format === 'csv' ? 'text/csv;charset=utf-8' : 'application/json',content:message.format === 'csv' ? exportCSV() : JSON.stringify({format:'setup-code-manager',schema_version:1,instance_id:INSTANCE,revision,devices},null,2)};
+  if(command === 'export') {
+    if(!['json','csv'].includes(message.format)) failure('validation_error');
+    const selected=message.record_ids !== undefined;
+    let records=devices;
+    if(selected) {
+      const ids=message.record_ids;
+      if(!Array.isArray(ids) || !ids.length || ids.length>10000 || ids.some(id=>typeof id !== 'string' || id.trim() !== id || !/^[A-Za-z0-9_.:-]{1,128}$/.test(id)) || new Set(ids).size !== ids.length) failure('validation_error');
+      const requested=new Set(ids);
+      if(ids.some(id=>!devices.some(item=>item.id === id))) failure('not_found');
+      records=devices.filter(item=>requested.has(item.id));
+    }
+    return {filename:`setup-code-manager-${selected ? 'selected-' : ''}DEMO.${message.format}`,mime:message.format === 'csv' ? 'text/csv;charset=utf-8' : 'application/json',count:records.length,scope:selected ? 'selected' : 'all',content:message.format === 'csv' ? exportCSV(records) : JSON.stringify({format:'setup-code-manager',schema_version:1,instance_id:INSTANCE,revision,devices:records},null,2)};
+  }
   if(command === 'preview_import') {
     let incoming;
     if(message.format === 'legacy') incoming=legacy();
@@ -143,7 +180,7 @@ async function callWS(message) {
   failure('not_loaded');
 }
 const panel=document.querySelector('setup-code-manager-panel');
-const hass={language:'de',user:{is_admin:true},callWS,connection:{subscribeEvents:async fn=>{subscribers.add(fn);return()=>subscribers.delete(fn);}}};
+const hass={language:'de',user:{id:'synthetic-admin',is_admin:true},callWS,connection:{subscribeEvents:async fn=>{subscribers.add(fn);return()=>subscribers.delete(fn);}}};
 panel.hass=hass;panel.narrow=innerWidth<800;
 window.addEventListener('resize',()=>{panel.narrow=innerWidth<800;});
 document.getElementById('language').addEventListener('change',event=>{panel.hass={...hass,language:event.target.value};});

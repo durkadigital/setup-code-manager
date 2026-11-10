@@ -4,7 +4,7 @@ Setup Code Manager ist eine **benutzerdefinierte Integration** für Home Assista
 Sie liegt im Ordner `custom_components/setup_code_manager` und wird unter
 **Geräte & Dienste** eingerichtet.
 
-Die aktuelle Version **0.1.0b7 ist eine Vorabversion**. Das Repository ist noch
+Die aktuelle Version **0.1.0b8 ist eine Vorabversion**. Das Repository ist noch
 nicht im allgemeinen Marketplace-Katalog gelistet und wird daher über seinen
 Link hinzugefügt. Lege vor einer Testinstallation oder einem Update eine aktuelle
 HA-Sicherung einschließlich Konfigurationsordner an.
@@ -28,7 +28,7 @@ Repository wird eine GitHub-Verbindung benötigt.
    `https://github.com/durkadigital/setup-code-manager`.
 3. Die von Home Assistant angeforderte GitHub-Verbindung abschließen.
 4. Die Repository-Details öffnen und **Vorabversionen** / **Pre-releases** aktivieren.
-5. **Setup Code Manager**, Version **0.1.0b7**, prüfen und installieren.
+5. **Setup Code Manager**, Version **0.1.0b8**, prüfen und installieren.
    Die Integrationskennung lautet **`setup_code_manager`**.
 6. Den anschließenden Einrichtungsdialog abschließen und die gewünschten
    Geräteintegrationen wählen. Sollte kein Dialog erscheinen, unter
@@ -54,17 +54,17 @@ Die HACS-kompatiblen Repository-Metadaten bleiben erhalten. Home Assistant 2026.
 Update-Einträge in den integrierten Marketplace.
 [Offizielle Hinweise zum Wechsel](https://www.home-assistant.io/blog/2026/11/04/release-202611/#thank-you-hacs).
 
-Für **0.1.0b7** gilt dennoch die Mindestversion **HA 2026.11.0**. Ältere
+Für **0.1.0b8** gilt dennoch die Mindestversion **HA 2026.11.0**. Ältere
 Home-Assistant-Versionen werden von dieser Version nicht unterstützt. Ein
 separates HACS muss auf HA 2026.11 nicht nachinstalliert werden.
 
 ## Manuell installieren
 
-1. Die [Release-Seite von 0.1.0b7](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b7)
+1. Die [Release-Seite von 0.1.0b8](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b8)
    öffnen und **Source code (zip)** herunterladen.
 2. Das Archiv entpacken. In
    `custom_components/setup_code_manager/manifest.json` muss die Version
-   **`0.1.0b7`** stehen.
+   **`0.1.0b8`** stehen.
 3. Den vollständigen Ordner `custom_components/setup_code_manager` nach
    `<HA-Konfiguration>/custom_components/setup_code_manager` kopieren.
 4. Home Assistant neu starten und die Integration unter **Geräte & Dienste** hinzufügen.

@@ -8,6 +8,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import floor_registry as fr
+from homeassistant.helpers import label_registry as lr
 
 from .const import ENABLED_PROTOCOLS
 from .matter_code import manual_pairing_code_from_mt
@@ -35,6 +37,42 @@ def device_identity(hass: HomeAssistant, device: dr.DeviceEntry) -> dict[str, st
     return {
         "name": ((device.name_by_user or device.name or "Gerät").strip() or "Gerät")[:256],
         "location": area.name.strip()[:256] if area else "",
+    }
+
+
+def device_organization(hass: HomeAssistant, device: dr.DeviceEntry) -> dict[str, list[dict]]:
+    """Return current direct HA area/floor and device labels, never durable data.
+
+    Area and entity labels are not inherited: selecting a label means the label
+    assigned to this device in Home Assistant. Missing registry entries are
+    ignored, including a deleted floor still referenced during registry events.
+    """
+    area = ar.async_get(hass).async_get_area(device.area_id) if device.area_id else None
+    floor = fr.async_get(hass).async_get_floor(area.floor_id) if area and area.floor_id else None
+    areas = (
+        [
+            {
+                "id": area.id,
+                "name": area.name.strip()[:256],
+                "floor_id": floor.floor_id if floor else "",
+                "floor_name": floor.name.strip()[:256] if floor else "",
+            }
+        ]
+        if area
+        else []
+    )
+    labels = (
+        [
+            {"id": label.label_id, "name": label.name.strip()[:256]}
+            for label_id in device.labels
+            if (label := lr.async_get(hass).async_get_label(label_id)) is not None
+        ]
+        if device.labels
+        else []
+    )
+    return {
+        "areas": areas,
+        "labels": sorted(labels, key=lambda label: (label["name"].casefold(), label["id"])),
     }
 
 
@@ -82,6 +120,7 @@ def serialize_record(hass: HomeAssistant, record: dict[str, Any]) -> dict[str, A
             active=active,
             available=active and device_is_available(hass, device.id),
             **(device_identity(hass, device) if active else {"name": "", "location": ""}),
+            **(device_organization(hass, device) if active else {"areas": [], "labels": []}),
         )
         if active:
             protocols.update(device_protocols(device))

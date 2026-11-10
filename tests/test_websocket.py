@@ -147,6 +147,32 @@ async def test_admin_commands_schedule_and_respond_through_real_ha_decorators(ap
         assert conn.results[0][1] is None
 
 
+async def test_selected_export_ids_are_passed_through_admin_api(api):
+    hass, manager, connection = api
+    conn = connection()
+    handler, message = command(hass, "export", record_ids=["one", "archived-two"])
+    handler(hass, conn, message)
+    await asyncio.wait_for(conn.completed, timeout=2)
+    manager.export.assert_called_once_with("json", ["one", "archived-two"])
+    assert not conn.errors and not conn.unhandled
+
+
+@pytest.mark.parametrize("selection", [None, "one", [False], [1]])
+async def test_export_selection_schema_rejects_wrong_shapes(api, selection):
+    hass, _, _ = api
+    with pytest.raises(probatio.Invalid):
+        command(hass, "export", record_ids=selection)
+
+
+async def test_selected_export_is_denied_to_non_admin_before_manager_access(api):
+    hass, manager, connection = api
+    conn = connection(admin=False)
+    handler, message = command(hass, "export", record_ids=["one"])
+    with pytest.raises(Unauthorized):
+        handler(hass, conn, message)
+    assert manager.mock_calls == []
+
+
 @pytest.mark.parametrize("name", COMMANDS)
 @pytest.mark.parametrize("authenticated", [True, False])
 async def test_all_commands_reject_non_admin_before_loading_or_scheduling(api, name, authenticated):

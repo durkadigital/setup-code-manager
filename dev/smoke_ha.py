@@ -163,6 +163,8 @@ async def smoke(directory: str, results: dict, evidence: RuntimeEvidence) -> Non
                     "panel.js",
                     "panel.css",
                     "filters.js",
+                    "preferences.js",
+                    "print.js",
                     "scanner.js",
                     "i18n.js",
                     "icons.js",
@@ -184,6 +186,17 @@ async def smoke(directory: str, results: dict, evidence: RuntimeEvidence) -> Non
                         if not user.is_admin:
                             assert listing["success"] is False
                             assert listing["error"]["code"] == "unauthorized"
+                            await ws.send_json(
+                                {
+                                    "id": 2,
+                                    "type": DOMAIN + "/export",
+                                    "format": "json",
+                                    "record_ids": ["not-public"],
+                                }
+                            )
+                            denied_export = await ws.receive_json()
+                            assert denied_export["success"] is False
+                            assert denied_export["error"]["code"] == "unauthorized"
                             results["checks"]["regular_user_api_denied"] = True
                             continue
                         assert listing["success"] and listing["result"]["devices"] == []
@@ -213,7 +226,35 @@ async def smoke(directory: str, results: dict, evidence: RuntimeEvidence) -> Non
                         exported = await ws.receive_json()
                         assert exported["success"]
                         assert len(json.loads(exported["result"]["content"])["devices"]) == 1
+                        assert exported["result"]["scope"] == "all"
+                        assert exported["result"]["count"] == 1
                         results["checks"]["admin_save_and_export"] = True
+                        for message_id, format in ((4, "json"), (5, "csv")):
+                            await ws.send_json(
+                                {
+                                    "id": message_id,
+                                    "type": DOMAIN + "/export",
+                                    "format": format,
+                                    "record_ids": [saved["result"]["id"]],
+                                }
+                            )
+                            selected = await ws.receive_json()
+                            assert selected["success"]
+                            assert selected["result"]["scope"] == "selected"
+                            assert selected["result"]["count"] == 1
+                            assert saved["result"]["id"] in selected["result"]["content"]
+                        await ws.send_json(
+                            {
+                                "id": 6,
+                                "type": DOMAIN + "/export",
+                                "format": "json",
+                                "record_ids": [saved["result"]["id"], "missing-record"],
+                            }
+                        )
+                        missing = await ws.receive_json()
+                        assert missing["success"] is False
+                        assert missing["error"]["code"] == "not_found"
+                        results["checks"]["admin_selected_export"] = True
             users.clear()
             results["stage"] = "reload"
             assert await hass.config_entries.async_unload(entry.entry_id)

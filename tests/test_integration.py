@@ -175,6 +175,8 @@ async def test_nested_module_and_css_urls_change_when_only_a_translation_changes
             "panel.js",
             "panel.css",
             "filters.js",
+            "preferences.js",
+            "print.js",
             "i18n.js",
             "icons.js",
             "scanner.js",

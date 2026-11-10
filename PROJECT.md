@@ -13,7 +13,7 @@ praktische Grenzen stehen in der [README](README.md).
 | Integrationskennung | `setup_code_manager` |
 | Integrationsordner | `custom_components/setup_code_manager` |
 | Speicherdatei | `.storage/setup_code_manager` im HA-Konfigurationsordner |
-| Aktuelle Vorabversion | `0.1.0b7` |
+| Aktuelle Vorabversion | `0.1.0b8` |
 | Mindestversion | Home Assistant `2026.11.0` |
 
 Grundlage ist [PhantomPhoton/Setup-Codes](https://github.com/PhantomPhoton/Setup-Codes),
@@ -24,22 +24,24 @@ Lizenzen stehen in [PROVENANCE.md](docs/PROVENANCE.md).
 
 ## Stand und Verteilung
 
-**0.1.0b7** ergänzt die Suche nach Notizen, QR-Inhalten und manuellen Codes sowie
-kombinierbare Raum-, Protokoll- und Codestatusfilter. Numerische Codes lassen sich
-mit oder ohne Leerzeichen und Bindestriche suchen.
+**0.1.0b8** ergänzt das Filter-Dropdown, Sortierung, Raumgruppen, gespeicherte
+Browseransichten, Teilbestands-Export, lokale Gerätekarten, geführte Code-Erfassung
+und Etagen-/Label-Filter. Das Speicher- und Austauschformat bleibt kompatibel.
+Bedienung und Ausbauplan stehen in [USAGE](docs/USAGE.de.md) und
+[ROADMAP](docs/ROADMAP.de.md).
 Die Integration befindet sich weiterhin in der Betaphase. Eine Aufnahme in den
 allgemeinen Marketplace-Katalog ist noch nicht erfolgt; die Installation ist über
 ein benutzerdefiniertes Repository oder manuell möglich.
 
-Die vorherige Version **0.1.0b6** wurde auf HA Core **2026.11.1** installiert und
+Die vorherige Version **0.1.0b7** wurde auf HA Core **2026.11.1** installiert und
 Home Assistant anschließend neu gestartet. Dabei wurden die korrigierten
 Oberflächentexte, der maskierte manuelle Matter-Code, schreibgeschützte HA-Namen und
 Räume, bearbeitbare Notizen und die grüne Speicherkennzeichnung geprüft.
 Die HTTPS-Anmeldung und Scannerauswahl sind geprüft; eine Livekamera-Abnahme auf
 dem physischen iPhone steht noch aus.
 
-Der lokale Abschlusslauf für Beta 7 umfasst **299 Python-Tests, 104 JavaScript-Tests**
-und **13 Prüfungen in einem isolierten echten HA-Core-Lauf**. Diese Ergebnisse
+Der lokale Abschlusslauf für Beta 8 umfasst **319 Python-Tests, 196 JavaScript-Tests**
+und **14 Prüfungen in einem isolierten echten HA-Core-Lauf**. Diese Ergebnisse
 belegen weder Export/Import im Zielsystem noch eine vollständige HA-
 Wiederherstellung. Der [Teststand](docs/TESTING.de.md) trennt Versionen, lokale
 Prüfungen und praktische Abnahme. Die [Sicherungsanleitung](docs/BACKUP.de.md)
@@ -69,7 +71,8 @@ python3 -m http.server 8765 --bind 127.0.0.1
 
 Die Vorschau unter `http://127.0.0.1:8765/dev/` lädt dieselbe Web-Komponente mit
 einer simulierten HA-Verbindung und sichtbar gekennzeichneten Beispieldaten.
-Änderungen bleiben im Arbeitsspeicher und werden beim Neuladen zurückgesetzt.
+Inventaränderungen bleiben im Arbeitsspeicher und werden beim Neuladen
+zurückgesetzt. Gespeicherte Beispielansichten bleiben lokal im Browser erhalten.
 Die Vorschau ersetzt keine Prüfung in einer laufenden Home-Assistant-Installation.
 
 ### Isolierter HA-Lauf
