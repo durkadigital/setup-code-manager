@@ -104,6 +104,20 @@ noch als praktische Abnahme durchzuführen:
 Der erfolgreiche Export allein belegt keine erfolgreiche vollständige
 Wiederherstellung von Home Assistant.
 
+## PDF-Gerätekarten sind lesbare Kopien
+
+Seit Beta 11 erzeugt Home Assistant Gerätekarten direkt als PDF für einzelne,
+gefilterte oder markierte Geräte. Notizen werden nur auf Wunsch aufgenommen.
+Die Erzeugung erfolgt im Arbeitsspeicher, verändert keine Inventardaten und legt
+auf dem HA-Server keine PDF-Datei ab. Erst der Browser beziehungsweise die
+Companion-App übernimmt den Download; dessen endgültigen Ablageort wählst du selbst.
+
+Eine PDF enthält lesbare Codes und gegebenenfalls QR-Codes. Sie lässt sich nicht
+als Inventar importieren und enthält keine wiederherstellbaren HA-Verknüpfungen
+oder persönlichen Ansichten. Sie ersetzt weder JSON-/CSV-Inventarexport noch
+HA-Konfigurationssicherung. Auf dem iPhone die Datei über **Teilen → In Dateien
+sichern** dauerhaft ablegen; die praktische PDF-Abnahme im Zielgerät bleibt offen.
+
 ## Teilbestände und persönliche Ansichten
 
 Der Export kann den Gesamtbestand, die aktuellen Treffer oder markierte Einträge
@@ -122,4 +136,5 @@ Ab Beta 10 gehören die zentral gespeicherten Ansichten und ihr Standard zur
 HA-Konfigurationssicherung. JSON-/CSV-Inventarexporte enthalten sie nicht.
 Beim gleichzeitigen Bearbeiten auf mehreren Geräten verhindern Revisionsprüfungen
 das stille Überschreiben eines neueren Katalogs.
-Druckausgaben und PDF-Dateien sind eigene lesbare Kopien der gewählten Codes.
+Heruntergeladene PDFs und spätere Ausdrucke sind eigene lesbare Kopien der
+gewählten Codes.

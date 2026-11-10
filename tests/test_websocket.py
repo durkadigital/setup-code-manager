@@ -30,6 +30,7 @@ COMMANDS = {
     "delete": {"record_id": "record-1", "expected_revision": 7},
     "archive": {"record_id": "record-1", "archived": True, "expected_revision": 7},
     "export": {"format": "json"},
+    "pdf": {"record_ids": ["record-1"], "include_notes": False, "language": "en"},
     "preview_import": {"format": "json", "content": SECRET},
     "import": {"token": "preview-1", "decisions": {"record-1": "add"}, "expected_revision": 7},
 }
@@ -85,6 +86,13 @@ async def api(tmp_path):
     manager.async_save.return_value = {"id": "record-1"}
     manager.async_sync.return_value = []
     manager.export.return_value = {"format": "json", "content": "{}"}
+    manager.async_export_pdf.return_value = {
+        "mime": "application/pdf",
+        "content": "JVBERi0=",
+        "encoding": "base64",
+        "byte_length": 5,
+        "count": 1,
+    }
     manager.async_preview_import.return_value = {"token": "preview-1"}
     manager.async_import.return_value = {"added": 1}
     hass.data[DOMAIN] = manager
@@ -129,6 +137,7 @@ def test_all_handlers_have_distinct_registered_types():
         websocket_api.ws_delete,
         websocket_api.ws_archive,
         websocket_api.ws_export,
+        websocket_api.ws_pdf,
         websocket_api.ws_preview_import,
         websocket_api.ws_import,
     ]
@@ -158,6 +167,7 @@ async def test_admin_commands_schedule_and_respond_through_real_ha_decorators(ap
         "delete": ("async_delete", ("record-1", 7)),
         "archive": ("async_archive", ("record-1", True, 7)),
         "export": ("export", ("json",)),
+        "pdf": ("async_export_pdf", (["record-1"], False, "en")),
         "preview_import": ("async_preview_import", ("json", SECRET, "admin-1")),
         "import": ("async_import", ("preview-1", 7, {"record-1": "add"}, "admin-1")),
     }
@@ -315,6 +325,9 @@ async def test_revision_schema_rejects_coercion_and_boolean_aliases(api, name, r
         ("delete", {"record_id": 123}),
         ("archive", {"archived": "yes"}),
         ("import", {"decisions": {"record-1": "delete"}}),
+        ("pdf", {"record_ids": "record-1"}),
+        ("pdf", {"include_notes": "yes"}),
+        ("pdf", {"language": "es"}),
     ],
 )
 async def test_command_schemas_reject_wrong_shapes(api, name, overrides):
@@ -345,6 +358,7 @@ async def test_errors_are_sanitized_before_ha_exception_handler(api, caplog, nam
         "delete": "async_delete",
         "archive": "async_archive",
         "export": "export",
+        "pdf": "async_export_pdf",
         "preview_import": "async_preview_import",
         "import": "async_import",
     }[name]

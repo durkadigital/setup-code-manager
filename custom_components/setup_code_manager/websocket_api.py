@@ -119,6 +119,18 @@ async def ws_export(manager, connection, msg):
 
 
 @_endpoint(
+    "pdf",
+    {
+        vol.Required("record_ids"): [str],
+        vol.Optional("include_notes", default=False): bool,
+        vol.Optional("language", default="en"): vol.In(("de", "en")),
+    },
+)
+async def ws_pdf(manager, connection, msg):
+    return await manager.async_export_pdf(msg["record_ids"], msg["include_notes"], msg["language"])
+
+
+@_endpoint(
     "preview_import",
     {
         vol.Required("format"): vol.In(("json", "csv", "legacy")),
@@ -155,6 +167,7 @@ def async_register(hass: HomeAssistant) -> None:
         ws_delete,
         ws_archive,
         ws_export,
+        ws_pdf,
         ws_preview_import,
         ws_import,
     ):

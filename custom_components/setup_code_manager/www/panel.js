@@ -4,7 +4,7 @@ import { icon, deviceIcon } from './icons.js';
 import { startScanner, scanImage } from './scanner.js';
 import { filterRecords, availableRooms, availableFloors, availableLabels, groupRecordsByRoom, SORTS } from './filters.js';
 import { sanitizeViewSettings, preferenceKey, loadViewPreferences, normalizeViewPreferences, mergeLocalViews, MAX_SAVED_VIEWS } from './preferences.js';
-import { printDeviceCards, MAX_PRINT_RECORDS } from './print.js';
+import { downloadPDF, MAX_PDF_RECORDS } from './pdf.js';
 import './qr.js';
 
 const DOMAIN = 'setup_code_manager';
@@ -57,6 +57,7 @@ class SetupCodeManagerPanel extends HTMLElement {
     this._hass = value;
     this._t = translator(value?.language);
     if (userChanged && this._started) {
+      if (this._modal?.kind === 'pdf') this._closeModal(true);
       this._preferenceScope = null; this._appliedPreferenceScope = null; this._viewsReady = false; this._viewsBusy = false;
       this._viewsWriteSequence = (this._viewsWriteSequence || 0) + 1; this._viewMigration = null;
       this._savedViews = []; this._defaultViewId = ''; this._activeViewId = ''; this._viewName = ''; this._legacyPreferences = {views:[],defaultViewId:''};
@@ -76,7 +77,7 @@ class SetupCodeManagerPanel extends HTMLElement {
   connectedCallback() { this._connected = true; globalThis.document?.addEventListener?.('pointerdown',this._outsideFilters,true); window.addEventListener?.('resize',this._resizeFilters); this._start(); }
   disconnectedCallback() {
     globalThis.document?.removeEventListener?.('pointerdown',this._outsideFilters,true); window.removeEventListener?.('resize',this._resizeFilters);
-    this._closeFilters(); this._captureQueue = null; this._printRecords = null; this._printNotes = false; this._selection.clear(); this._selectedId = null;
+    this._closeFilters(); this._captureQueue = null; this._pdfRecords = null; this._pdfNotes = false; this._pdfPending = false; this._selection.clear(); this._selectedId = null;
     this._connected = false; this._started = false; this._loadSequence++; this._refreshRequest = null; this._dialogGeneration++; this._draft = null; this._modal = null; this._busy = false;
     this._appliedPreferenceScope = null; this._viewsBusy = false; this._viewMigration = null; this._viewsWriteSequence = (this._viewsWriteSequence || 0) + 1;
     this._revealed.clear(); this._revealedManual.clear();
@@ -142,7 +143,7 @@ class SetupCodeManagerPanel extends HTMLElement {
   }
   _busyBlocks(action) {
     if (['save-view','delete-view','set-default-view','clear-default-view','import-local-views'].includes(action) && (!this._viewsReady || this._viewsBusy)) return true;
-    return this._busy && !(this._readingPhoto && action === 'close-modal');
+    return this._busy && !((this._readingPhoto || this._pdfPending) && action === 'close-modal');
   }
   _button(action, label, image = '', style = '', attrs = '') {
     return `<button type="button" class="button ${style}" data-action="${action}" ${attrs} ${this._busyBlocks(action) ? 'disabled' : ''}>${image ? icon(image) : ''}${esc(label)}</button>`;
@@ -440,7 +441,7 @@ class SetupCodeManagerPanel extends HTMLElement {
   _renderSelectionBar(rows) {
     if (!this._selecting) return '';
     const t = this._t, selected = this._selectionRecords();
-    return `<div class="selection-bar"><strong>${esc(t('selectedCount',{count:selected.length}))}</strong>${this._button('select-results',t(rows.length && rows.every(record => this._selection.has(record.id)) ? 'deselectAll' : 'selectResults'),'','text')}${this._button('export-selected',t('export'),'upload','',selected.length ? '' : 'disabled')}${this._button('print-selected',t('printCards'),'print','',selected.length && selected.length <= MAX_PRINT_RECORDS ? '' : 'disabled')}</div>`;
+    return `<div class="selection-bar"><strong>${esc(t('selectedCount',{count:selected.length}))}</strong>${this._button('select-results',t(rows.length && rows.every(record => this._selection.has(record.id)) ? 'deselectAll' : 'selectResults'),'','text')}${this._button('export-selected',t('export'),'upload','',selected.length ? '' : 'disabled')}${this._button('pdf-selected',t('pdfCards'),'pdf','',selected.length && selected.length <= MAX_PDF_RECORDS ? '' : 'disabled')}</div>`;
   }
   _codeStatus(record) {
     const stored = hasCode(record);
@@ -530,7 +531,7 @@ class SetupCodeManagerPanel extends HTMLElement {
   _renderDetails(record) {
     const t = this._t;
     const links = record.links || [];
-    return `<aside id="inventory-details" class="details" aria-label="${esc(record.name)}"><div class="detail-heading"><div><h2 title="${esc(record.name)}">${esc(record.name)}</h2></div>${this._iconButton('close-details',t('close'),'close')}</div><div class="detail-body"><div class="detail-meta">${this._codeStatus(record)}<p>${esc([record.location,record.model].filter(Boolean).join(' · ') || record.manufacturer || '')}</p>${record.archived ? `<span class="badge">${icon('archive')}${esc(t('archived'))}</span>` : ''}</div><div class="detail-actions">${this._button('edit',t('edit'),'','text',`data-id="${esc(record.id)}"`)}${this._button('print-record',t('printCard'),'print','text',`data-id="${esc(record.id)}"`)}</div><section class="detail-section"><h3>Home Assistant</h3><div class="detail-status">${this._status(record)}</div>${links.some(link => link.active === false) ? `<p class="muted small" style="margin-top:12px">${esc(t('removedHint'))}</p>` : ''}${links.filter(link => link.active !== false).map(link => `<div class="link-item"><span class="small muted">${esc(link.name || record.name)}</span><a class="button" href="/config/devices/device/${encodeURIComponent(link.ha_device_id)}">${icon('external')}${esc(t('openDevice'))}</a></div>`).join('')}${this._button('edit-links',t(links.length ? 'changeLinks' : 'linkDevice'),'link','text',`data-id="${esc(record.id)}"`)}</section><section class="detail-section"><h3>${esc(t('setupCodes'))}</h3>${recordCodes(record).length ? recordCodes(record).map(code => this._renderCode(code)).join('') : `<p class="muted">${esc(t('noCode'))}</p>`}${this._button('edit-codes',t('addCode'),'plus','text',`data-id="${esc(record.id)}"`)}</section><section class="detail-section"><h3>${esc(t('note'))}</h3><p class="muted">${esc(record.notes || t('noNote'))}</p>${record.manufacturer || record.serial_number ? `<p class="small muted" style="margin-top:16px">${esc([record.manufacturer, record.serial_number].filter(Boolean).join(' · '))}</p>` : ''}</section><section class="detail-section detail-bottom">${this._button('archive',t(record.archived ? 'restore' : 'archiveAction'),record.archived ? 'restore' : 'archive','text',`data-id="${esc(record.id)}"`)}${this._button('delete',t('delete'),'trash','text danger',`data-id="${esc(record.id)}"`)}</section></div></aside>`;
+    return `<aside id="inventory-details" class="details" aria-label="${esc(record.name)}"><div class="detail-heading"><div><h2 title="${esc(record.name)}">${esc(record.name)}</h2></div>${this._iconButton('close-details',t('close'),'close')}</div><div class="detail-body"><div class="detail-meta">${this._codeStatus(record)}<p>${esc([record.location,record.model].filter(Boolean).join(' · ') || record.manufacturer || '')}</p>${record.archived ? `<span class="badge">${icon('archive')}${esc(t('archived'))}</span>` : ''}</div><div class="detail-actions">${this._button('edit',t('edit'),'','text',`data-id="${esc(record.id)}"`)}${this._button('pdf-record',t('pdfCard'),'pdf','text',`data-id="${esc(record.id)}"`)}</div><section class="detail-section"><h3>Home Assistant</h3><div class="detail-status">${this._status(record)}</div>${links.some(link => link.active === false) ? `<p class="muted small" style="margin-top:12px">${esc(t('removedHint'))}</p>` : ''}${links.filter(link => link.active !== false).map(link => `<div class="link-item"><span class="small muted">${esc(link.name || record.name)}</span><a class="button" href="/config/devices/device/${encodeURIComponent(link.ha_device_id)}">${icon('external')}${esc(t('openDevice'))}</a></div>`).join('')}${this._button('edit-links',t(links.length ? 'changeLinks' : 'linkDevice'),'link','text',`data-id="${esc(record.id)}"`)}</section><section class="detail-section"><h3>${esc(t('setupCodes'))}</h3>${recordCodes(record).length ? recordCodes(record).map(code => this._renderCode(code)).join('') : `<p class="muted">${esc(t('noCode'))}</p>`}${this._button('edit-codes',t('addCode'),'plus','text',`data-id="${esc(record.id)}"`)}</section><section class="detail-section"><h3>${esc(t('note'))}</h3><p class="muted">${esc(record.notes || t('noNote'))}</p>${record.manufacturer || record.serial_number ? `<p class="small muted" style="margin-top:16px">${esc([record.manufacturer, record.serial_number].filter(Boolean).join(' · '))}</p>` : ''}</section><section class="detail-section detail-bottom">${this._button('archive',t(record.archived ? 'restore' : 'archiveAction'),record.archived ? 'restore' : 'archive','text',`data-id="${esc(record.id)}"`)}${this._button('delete',t('delete'),'trash','text danger',`data-id="${esc(record.id)}"`)}</section></div></aside>`;
   }
   _manualValue(code) {
     return code?.protocol === 'matter' && code.value?.startsWith('MT:') && typeof code.manual_value === 'string' && /^(?:[0-9]{11}|[0-9]{21})$/.test(code.manual_value) ? code.manual_value : '';
@@ -578,13 +579,15 @@ class SetupCodeManagerPanel extends HTMLElement {
   }
   _closeModal(force = false, preserveCapture = false) {
     if (this._busyBlocks('close-modal')) return;
+    const closingPDF = this._modal?.kind === 'pdf';
     if (this._readingPhoto) {
       this._photoController?.abort(); this._photoController = null; this._readingPhoto = false; this._busy = false;
     }
     if (!force && this._draft && this._dirty && ['editor','picker','choose-record','code-conflict','scanner','start','revision','duplicate'].includes(this._modal?.kind) && !window.confirm(this._t('discard'))) { this._renderModal(); return; }
     this._dialogGeneration++; this._stopCamera(); this._photoController?.abort(); this._photoController = null; this._readingPhoto = false; this.shadowRoot.querySelector('dialog')?.close();
     this.shadowRoot.getElementById('modal-root').innerHTML = ''; this._modal = null;
-    this._draft = null; this._pendingCodes = null; this._preview = null; this._importSource = null; this._printRecords = null;
+    this._draft = null; this._pendingCodes = null; this._preview = null; this._importSource = null; this._pdfRecords = null; this._pdfNotes = false; this._pdfPending = false;
+    if (closingPDF) this._busy = false;
     if (!preserveCapture) this._captureQueue = null;
     this._formRevealed.clear(); this._compareRevealed.clear();
     this.shadowRoot.querySelector(this._selectedId ? '[data-action="edit"]' : '[data-action="add"]')?.focus();
@@ -601,7 +604,7 @@ class SetupCodeManagerPanel extends HTMLElement {
     const cancel = this._button('close-modal',t('cancel'));
     let html = '';
     if (kind === 'start') html = this._modalFrame(t('addTitle'), `<p>${esc(t(this._canLiveScan() ? 'addIntro' : 'photoHint'))}</p><div class="choice-list">${[['start-scan',this._canLiveScan() ? 'scan' : 'takePhoto','camera'],['start-photo','photo','image'],['start-manual','manual','keyboard']].map(([action,label,image]) => `<button type="button" class="choice" data-action="${action}">${icon(image)}<span class="grow">${esc(t(label))}</span>${icon('chevron')}</button>`).join('')}</div><p class="small muted" style="margin-top:22px">${esc(t('noPairing'))}</p>`);
-    else if (kind === 'menu') html = this._modalFrame(t('menu'),`<div class="choice-list">${this._button('import',t('import'),'download')}${this._button('export',t('export'),'upload')}${this._button('capture-start',t('captureMissing'),'camera')}${this._button('print-filtered',t('printCards'),'print')}${this._button('refresh-menu',t('refresh'),'refresh')}</div>`);
+    else if (kind === 'menu') html = this._modalFrame(t('menu'),`<div class="choice-list">${this._button('import',t('import'),'download')}${this._button('export',t('export'),'upload')}${this._button('capture-start',t('captureMissing'),'camera')}${this._button('pdf-filtered',t('pdfCards'),'pdf')}${this._button('refresh-menu',t('refresh'),'refresh')}</div>`);
     else if (kind === 'editor') html = this._renderEditor();
     else if (kind === 'scanner') html = this._modalFrame(t('scanTitle'), `<p>${esc(t('scanHint'))}</p><div id="scanner-error"></div><div class="scanner-frame"><video id="scan-video" autoplay muted playsinline></video><div class="scan-guide"></div><div class="camera-status" id="camera-status">${esc(t('cameraLoading'))}</div></div><p class="small">${esc(t('noPairing'))}</p><div class="scanner-buttons">${this._button('scan-capture',t('takePhoto'),'camera')}${this._button('scan-photo',t('photo'),'image')}${this._button('scan-manual',t('enterCode'),'keyboard')}</div>`);
     else if (kind === 'picker') html = this._renderPicker();
@@ -611,7 +614,7 @@ class SetupCodeManagerPanel extends HTMLElement {
     else if (kind === 'delete') html = this._modalFrame(t('deleteTitle'),`<p>${esc(t('deleteBody',{name:this._modal.record.name,count:recordCodes(this._modal.record).length}))}</p>`,cancel+this._button('confirm-delete',t('delete'),'trash','primary danger'));
     else if (kind === 'qr') html = this._modalFrame(t('qr'),`<div id="qr-display" class="qr-display"></div><p style="text-align:center">${esc(this._modal.name)} · ${esc(protocolNames[this._modal.code.protocol])}</p>`,this._button('close-modal',t('close')));
     else if (kind === 'export') html = this._renderExport();
-    else if (kind === 'print') html = this._renderPrint();
+    else if (kind === 'pdf') html = this._renderPDF();
     else if (kind === 'capture-setup') html = this._renderCaptureSetup();
     else if (kind === 'import') html = this._modalFrame(t('importTitle'),`<p>${esc(t('importIntro'))}</p><div class="choice-list">${this._button('pick-import',t('chooseFile'),'download')}</div>`);
     else if (kind === 'preview') html = this._renderPreview();
@@ -856,27 +859,32 @@ class SetupCodeManagerPanel extends HTMLElement {
     const valid = this._exportScope === 'all' || this._exportScopes[this._exportScope]?.length;
     return this._modalFrame(t('exportTitle'),body,this._button('close-modal',t('cancel'))+this._button('download-export',t(this._busy ? 'exporting' : 'export'),'upload','primary',valid ? '' : 'disabled'));
   }
-  _openPrint(records) {
+  _openPDF(records) {
     this._closeFilters();
-    if (!records?.length || records.length > MAX_PRINT_RECORDS) { this._toast(this._t('printLimit',{count:MAX_PRINT_RECORDS})); return; }
-    this._printRecords = clone(records); this._printNotes = false; this._openModal('print');
+    if (!Array.isArray(records) || !records.length || records.length > MAX_PDF_RECORDS || records.some(record => typeof record?.id !== 'string' || !record.id) || new Set(records.map(record => record.id)).size !== records.length) { this._toast(this._t('pdfLimit',{count:MAX_PDF_RECORDS})); return; }
+    // The confirmation needs names and IDs only. Readable codes stay on HA
+    // until the explicit request produces the downloadable file.
+    this._pdfRecords = records.map(record => ({id:record.id,name:record.name})); this._pdfNotes = false; this._pdfPending = false; this._openModal('pdf');
   }
-  _renderPrint() {
+  _renderPDF() {
     const t = this._t;
-    return this._modalFrame(t('printCards'),`<p>${esc(t('printScope',{count:this._printRecords.length}))}</p><p class="small muted">${esc(this._printRecords.map(record => record.name).join(', '))}</p><label class="check-label"><input type="checkbox" data-field="print-notes" ${this._printNotes ? 'checked' : ''}>${esc(t('printNotes'))}</label><p class="small">${esc(t('printHint'))}</p>${this._notice(t('printWarning'),'warning')}`,this._button('close-modal',t('cancel'))+this._button('print-confirm',t('openPrint'),'print','primary'));
+    return this._modalFrame(t('pdfCards'),`<p>${esc(t('pdfScope',{count:this._pdfRecords.length}))}</p><p class="small muted">${esc(this._pdfRecords.map(record => record.name).join(', '))}</p><label class="check-label"><input type="checkbox" data-field="pdf-notes" ${this._pdfNotes ? 'checked' : ''} ${this._busy ? 'disabled' : ''}>${esc(t('pdfNotes'))}</label><p class="small">${esc(t('pdfHint'))}</p>${this._notice(t('pdfWarning'),'warning')}`,this._button('close-modal',t('cancel'))+this._button('pdf-confirm',t(this._busy ? 'pdfCreating' : 'createPDF'),'pdf','primary'));
   }
-  async _print() {
-    if (this._busy || !this._printRecords?.length) return;
-    const generation = this._dialogGeneration, modal = this._modal, records = this._printRecords;
-    this._busy = true;
-    // Keep this call in the original confirmation click, before any await.
-    const pending = printDeviceCards(this._printRecords,{language:this._hass?.language,includeNotes:this._printNotes});
-    this._renderModal();
-    const result = await pending;
-    if (generation !== this._dialogGeneration || modal !== this._modal || records !== this._printRecords) return;
-    this._busy = false;
-    if (result.status === 'blocked' || result.status === 'error') { this._modalError = this._t(result.status === 'blocked' ? 'printBlocked' : 'printFailed'); this._renderModal(); }
-    else this._closeModal(true);
+  async _createPDF() {
+    if (this._busy || !this._pdfRecords?.length) return;
+    const generation = this._dialogGeneration, modal = this._modal, records = this._pdfRecords, userId = this._hass?.user?.id;
+    const current = () => this._connected && generation === this._dialogGeneration && modal === this._modal && records === this._pdfRecords && userId === this._hass?.user?.id;
+    this._busy = true; this._pdfPending = true; this._renderModal();
+    try {
+      const result = await this._api('pdf',{record_ids:records.map(record => record.id),include_notes:this._pdfNotes === true,language:this._hass?.language?.toLowerCase().startsWith('de') ? 'de' : 'en'});
+      if (!current()) return;
+      downloadPDF(result,{expectedCount:records.length});
+      this._busy = false; this._pdfPending = false; this._closeModal(true); this._toast(this._t('pdfDownloadStarted'));
+    } catch (error) {
+      if (!current()) return;
+      this._busy = false; this._pdfPending = false;
+      this._modalError = this._t(error?.code === 'not_found' ? 'selectionExpired' : error?.code === 'pdf_too_large' ? 'pdfTooLarge' : 'pdfFailed'); this._renderModal();
+    }
   }
   _captureCandidates(protocol) {
     return filterRecords(this._devices,{...this._viewSettings(),protocol:'',codeStatus:'all',query:this._query},this._hass?.language).filter(record => !record.archived && !hasCode(record,protocol));
@@ -988,7 +996,7 @@ class SetupCodeManagerPanel extends HTMLElement {
     else if (field === 'saved-view') this._applyView(el.value);
     else if (field === 'record-selection') { el.checked ? this._selection.add(el.dataset.id) : this._selection.delete(el.dataset.id); this._renderMain(); }
     else if (field === 'export-scope') { this._exportScope = el.value; this._renderModal(); }
-    else if (field === 'print-notes') this._printNotes = el.checked;
+    else if (field === 'pdf-notes') this._pdfNotes = el.checked;
     else if (field === 'capture-protocol') { this._captureProtocol = el.value; this._renderModal(); }
     else if (field === 'code-protocol' && this._draft) { this._draft.codes[Number(el.dataset.index)].protocol = el.value; this._activeProtocol = el.value; this._dirty = true; this._renderModal(); }
     else if (field === 'export-format') this._exportFormat = el.value;
@@ -1022,10 +1030,10 @@ class SetupCodeManagerPanel extends HTMLElement {
       else if (action === 'toggle-record') { this._selection.has(id) ? this._selection.delete(id) : this._selection.add(id); this._renderMain(); }
       else if (action === 'select-results') { const rows = this._visibleDevices(); if (rows.every(item => this._selection.has(item.id))) this._selection.clear(); else this._selection = new Set(rows.map(item => item.id)); this._renderMain(); }
       else if (action === 'export-selected') this._openExport('selected');
-      else if (action === 'print-selected') this._openPrint(this._selectionRecords());
-      else if (action === 'print-filtered') this._openPrint(this._visibleDevices());
-      else if (action === 'print-record' && record) this._openPrint([record]);
-      else if (action === 'print-confirm') await this._print();
+      else if (action === 'pdf-selected') this._openPDF(this._selectionRecords());
+      else if (action === 'pdf-filtered') this._openPDF(this._visibleDevices());
+      else if (action === 'pdf-record' && record) this._openPDF([record]);
+      else if (action === 'pdf-confirm') await this._createPDF();
       else if (action === 'capture-start') { this._captureProtocol = this._protocol || 'matter'; this._openModal('capture-setup'); }
       else if (action === 'capture-begin') this._startCaptureQueue();
       else if (action === 'capture-skip') this._skipCapture();

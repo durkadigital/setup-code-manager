@@ -38,6 +38,23 @@ complete license, npm origin and SHA-256 checksums in
 [www/vendor](../custom_components/setup_code_manager/www/vendor/README.md).
 The original MIT license and QR encoder notices remain unchanged.
 
+## PDF generation and fonts
+
+PDF device cards use ReportLab **5.1.0**, pinned in the integration manifest and
+installed as a Home Assistant dependency. Its three-clause BSD notice is copied
+byte-for-byte from the installed PyPI distribution's
+`reportlab-5.1.0.dist-info/licenses/LICENSE` into
+[REPORTLAB.txt](../custom_components/setup_code_manager/licenses/REPORTLAB.txt).
+The original copyright, conditions and disclaimer are retained.
+
+The renderer uses the dependency's `Vera.ttf` and `VeraBd.ttf` font files and
+embeds the required glyphs in PDFs. Their complete original Bitstream Vera
+copyright and permission text, including the supplied FAQ, is copied byte-for-byte
+from `reportlab/fonts/bitstream-vera-license.txt` into
+[BITSTREAM_VERA.txt](../custom_components/setup_code_manager/licenses/BITSTREAM_VERA.txt).
+No font or PDF service is contacted at runtime. The PDF renderer and the direct
+download helper do not replace the MIT and Apache-2.0 notices above.
+
 ## Technical naming check, 2026-11-07
 
 - GitHub repository search `setup-code-manager in:name`: no exact matching repository name returned.

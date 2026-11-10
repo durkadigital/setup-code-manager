@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import hashlib
+import io
 import json
 import logging
 import os
@@ -35,6 +37,7 @@ from homeassistant.auth.const import GROUP_ID_ADMIN, GROUP_ID_USER  # noqa: E402
 from homeassistant.config_entries import ConfigEntryState  # noqa: E402
 from homeassistant.runner import RuntimeConfig  # noqa: E402
 from homeassistant.setup import async_setup_component  # noqa: E402
+from pypdf import PdfReader  # noqa: E402
 
 DOMAIN = "setup_code_manager"
 REPO = Path(__file__).resolve().parents[1]
@@ -183,7 +186,7 @@ async def smoke(directory: str, results: dict, evidence: RuntimeEvidence) -> Non
                     "panel.css",
                     "filters.js",
                     "preferences.js",
-                    "print.js",
+                    "pdf.js",
                     "scanner.js",
                     "i18n.js",
                     "icons.js",
@@ -222,6 +225,15 @@ async def smoke(directory: str, results: dict, evidence: RuntimeEvidence) -> Non
                                     4,
                                     "save_view_preferences",
                                     {"preferences": synthetic_view, "expected_revision": 0},
+                                ),
+                                (
+                                    5,
+                                    "pdf",
+                                    {
+                                        "record_ids": ["not-public"],
+                                        "include_notes": False,
+                                        "language": "en",
+                                    },
                                 ),
                             ):
                                 await ws.send_json(
@@ -345,6 +357,52 @@ async def smoke(directory: str, results: dict, evidence: RuntimeEvidence) -> Non
                         assert missing["success"] is False
                         assert missing["error"]["code"] == "not_found"
                         results["checks"]["admin_selected_export"] = True
+                        await ws.send_json(
+                            {
+                                "id": 7,
+                                "type": DOMAIN + "/pdf",
+                                "record_ids": [saved["result"]["id"]],
+                                "include_notes": False,
+                                "language": "de",
+                            }
+                        )
+                        pdf_result = await ws.receive_json()
+                        assert pdf_result["success"]
+                        pdf_file = pdf_result["result"]
+                        assert pdf_file["mime"] == "application/pdf"
+                        assert pdf_file["encoding"] == "base64" and pdf_file["count"] == 1
+                        pdf_bytes = base64.b64decode(pdf_file["content"], validate=True)
+                        assert len(pdf_bytes) == pdf_file["byte_length"]
+                        assert pdf_bytes.startswith(b"%PDF-") and pdf_bytes.rstrip().endswith(
+                            b"%%EOF"
+                        )
+                        pdf_reader = PdfReader(io.BytesIO(pdf_bytes))
+                        assert len(pdf_reader.pages) == 1
+                        pdf_text = pdf_reader.pages[0].extract_text()
+                        assert "Synthetic runtime record" in pdf_text and "03145154" in pdf_text
+                        assert pdf_reader.pages[0].get("/Annots") is None
+                        results["checks"]["admin_pdf_generation"] = True
+                        await ws.send_json(
+                            {
+                                "id": 8,
+                                "type": DOMAIN + "/pdf",
+                                "record_ids": [saved["result"]["id"], "missing-record"],
+                                "include_notes": False,
+                                "language": "de",
+                            }
+                        )
+                        missing_pdf = await ws.receive_json()
+                        assert (
+                            not missing_pdf["success"]
+                            and missing_pdf["error"]["code"] == "not_found"
+                        )
+                        await ws.send_json({"id": 9, "type": DOMAIN + "/export", "format": "json"})
+                        after_pdf = await ws.receive_json()
+                        assert (
+                            after_pdf["success"]
+                            and after_pdf["result"]["content"] == exported["result"]["content"]
+                        )
+                        results["checks"]["pdf_exact_selection_and_read_only"] = True
                         await ws.send_json({"id": 20, "type": DOMAIN + "/list"})
                         before_preferences = await ws.receive_json()
                         assert before_preferences["success"]

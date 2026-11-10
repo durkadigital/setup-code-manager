@@ -95,23 +95,45 @@ erneut auswählen. JSON und CSV behalten das vorhandene Austauschformat und sind
 auch als Teilbestand wieder importierbar. Einrichtungscodes sind in den Dateien
 lesbar. Ein Teilbestand ersetzt keine vollständige Inventarsicherung.
 
-## Gerätekarten drucken
+## Gerätekarten als PDF herunterladen
 
-Eine Gerätekarte lässt sich in den Gerätedetails öffnen. Mehrere Karten werden
-über **Auswählen → Gerätekarten drucken** vorbereitet; am Handy steht die Funktion
-auch im Menü für die aktuellen Treffer bereit. Pro Vorgang sind bis zu 100 Geräte
-möglich. Notizen werden nur nach ausdrücklicher Auswahl mit ausgegeben.
+In den Gerätedetails **Gerätekarte als PDF** wählen. Für mehrere Geräte über
+**Auswählen → Gerätekarten als PDF** gehen; im Menü steht dieselbe Funktion für
+die aktuellen Treffer bereit. Die Bestätigung zeigt den gewählten Umfang mit
+1 bis 100 Geräten. **Notizen mit ausgeben** ist zunächst ausgeschaltet.
+Anschließend **PDF erstellen** wählen. Der Download startet direkt, ohne Popup
+oder Browser-Druckdialog. Die heruntergeladene Datei lässt sich anschließend
+speichern, teilen oder mit einer PDF-App drucken.
 
-Die gesonderte Druckansicht enthält Namen, Raum, Gerätemetadaten, gespeicherte Codes
-und darstellbare Original-QRs. Der manuelle Matter-Code steht getrennt beim
-Original-QR. Aus bloßen Zahlencodes werden keine neuen Kopplungs-QRs erfunden.
-Die Erzeugung erfolgt lokal ohne externe Schrift-, Bild- oder QR-Dienste.
+Die PDF enthält Namen, Raum, Gerätemetadaten, gespeicherte Codes und darstellbare
+Original-QRs. Der manuelle Matter-Code steht getrennt beim Original-QR. Aus bloßen
+Zahlencodes werden keine neuen Kopplungs-QRs erzeugt. Sehr lange QR-Inhalte können
+statt als QR vollständig als Text erscheinen; die PDF weist darauf hin.
 
-Im Browser-Druckdialog Drucker und Papierformat wählen beziehungsweise als PDF
-sichern, sofern das Drucksystem dies anbietet. Blockiert der Browser das zusätzliche
-Fenster, zeigt die App eine entsprechende Meldung. Die App erhält keine verlässliche
-Bestätigung, ob tatsächlich gedruckt, als PDF gespeichert oder abgebrochen wurde.
-Gerätekarten enthalten lesbare Einrichtungscodes.
+Die gewählten Geräte werden beim Öffnen der Bestätigung festgehalten. Die PDF
+verwendet beim Erstellen die aktuellen Daten dieser Geräte aus Home Assistant.
+Wird ein Gerät zwischenzeitlich entfernt, entsteht keine unvollständige PDF und
+kein unbeabsichtigter Gesamtexport. Den Dialog schließen, die Liste aktualisieren
+und erneut auswählen.
+
+Die Erzeugung läuft lokal in Home Assistant, ohne externe Schrift-, Bild- oder
+QR-Dienste. Sie ändert weder Inventar noch Codes und legt auf dem HA-Server keine
+PDF-Datei ab. Pro Ausgabe gelten höchstens 8 MiB, 300 Seiten und insgesamt
+250.000 Textzeichen. Bei einer zu großen Auswahl bleibt der Dialog erhalten:
+weniger Geräte wählen oder Notizen weglassen. Inhalte werden nicht still gekürzt.
+
+Auf dem iPhone die PDF im Download-/Teilen-Dialog über **Teilen → In Dateien
+sichern** ablegen. Die geprüfte HA-iOS-App 2026.10.3 unterstützt ab iOS 17 den
+[nativen Downloadweg](https://github.com/home-assistant/iOS/blob/release/2026.10.3/2026.3322/Sources/App/Frontend/WebView/WebViewController/WebViewController+WebKitDelegates.swift#L128-L135)
+und ein [Teilen-Menü](https://github.com/home-assistant/iOS/blob/release/2026.10.3/2026.3322/Sources/App/Frontend/DownloadManager/DownloadManagerView.swift#L79-L105).
+Die App hält die Datei zunächst temporär; vor dem Schließen an den gewünschten
+Ort sichern. Diese Unterstützung ist im Quellcode geprüft; die praktische Abnahme
+des PDF-Downloads auf dem physischen Ziel-iPhone steht noch aus.
+
+**PDF erstellt. Download gestartet.** bestätigt nur den gestarteten Download,
+nicht das endgültige Speichern auf deinem Gerät. Die Datei enthält lesbare
+Einrichtungscodes. Sie ist kein importierbares Inventarbackup; dafür weiterhin
+JSON/CSV und die HA-Sicherung verwenden.
 
 ## Fehlende Codes nacheinander erfassen
 

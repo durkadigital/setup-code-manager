@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 from collections import Counter
 from copy import deepcopy
@@ -20,6 +21,7 @@ from homeassistant.helpers import label_registry as lr
 from homeassistant.helpers.debounce import Debouncer
 
 from .const import EVENT_UPDATED, REFRESH_COOLDOWN
+from .device_pdf import MAX_PDF_BYTES, MAX_PDF_RECORDS, DevicePDFError, build_device_pdf
 from .inventory import MAX_RECORDS, RECORD_FIELDS, _identifier, new_record, validate_record
 from .preferences import (
     MAX_REVISION,
@@ -68,6 +70,7 @@ class SetupCodesManager:
         )
         self._view_preferences_error = False
         self._lock = asyncio.Lock()
+        self._pdf_lock = asyncio.Lock()
         self._closing = False
         self._unsubs: list[Any] = []
         self._debouncer: Debouncer | None = None
@@ -112,6 +115,10 @@ class SetupCodesManager:
         self._closing = True
         self.async_unload()
         async with self._lock:
+            pass
+        # An executor thread cannot be cancelled. PDF requests retain this lock
+        # until rendering finishes, including after client cancellation.
+        async with self._pdf_lock:
             pass
 
     @callback
@@ -427,6 +434,80 @@ class SetupCodesManager:
             "count": len(data["devices"]),
             "scope": "selected" if selected else "all",
         }
+
+    async def async_export_pdf(
+        self, record_ids: list[str], include_notes: bool = False, language: str = "de"
+    ) -> dict[str, Any]:
+        """Render exact selected current records without changing stored data."""
+        if (
+            not isinstance(record_ids, list)
+            or not 1 <= len(record_ids) <= MAX_PDF_RECORDS
+            or type(include_notes) is not bool
+            or language not in ("de", "en")
+        ):
+            raise ValueError("Invalid PDF selection or options")
+        requested = [_identifier(record_id, "record ID") for record_id in record_ids]
+        if len(set(requested)) != len(requested):
+            raise ValueError("Duplicate PDF record IDs")
+        async with self._pdf_lock:
+            async with self._lock:
+                if self._closing:
+                    raise InventoryError("not_loaded")
+                records = {record["id"]: record for record in self.store.devices}
+                if any(record_id not in records for record_id in requested):
+                    raise InventoryError("not_found")
+                # Preserve the requested visible order and authoritative live HA
+                # identity/manual Matter values. The executor never touches HA.
+                snapshot = []
+                for record_id in requested:
+                    serialized = serialize_record(self.hass, records[record_id])
+                    snapshot.append(
+                        {
+                            key: serialized[key]
+                            for key in (
+                                "name",
+                                "location",
+                                "manufacturer",
+                                "model",
+                                "serial_number",
+                                "notes",
+                                "codes",
+                            )
+                        }
+                    )
+            job = self.hass.async_add_executor_job(
+                build_device_pdf, snapshot, language, include_notes
+            )
+            cancelled = False
+            try:
+                while True:
+                    try:
+                        document = await asyncio.shield(job)
+                        break
+                    except asyncio.CancelledError:
+                        if job.cancelled():
+                            raise
+                        cancelled = True
+            except DevicePDFError as err:
+                raise InventoryError(err.code) from err
+            except Exception as err:
+                raise InventoryError("pdf_failed") from err
+            if cancelled:
+                raise asyncio.CancelledError
+            if self._closing:
+                raise InventoryError("not_loaded")
+            if not isinstance(document, bytes) or not document.startswith(b"%PDF-"):
+                raise InventoryError("pdf_failed")
+            if len(document) > MAX_PDF_BYTES:
+                raise InventoryError("pdf_too_large")
+            return {
+                "filename": f"setup-code-manager-device-cards-{datetime.now(UTC):%Y-%m-%d}.pdf",
+                "mime": "application/pdf",
+                "content": base64.b64encode(document).decode("ascii"),
+                "encoding": "base64",
+                "byte_length": len(document),
+                "count": len(snapshot),
+            }
 
     def _read_legacy(self) -> str:
         if self.legacy_path.stat().st_size > MAX_CONTENT_BYTES:

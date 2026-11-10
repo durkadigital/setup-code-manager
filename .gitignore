@@ -224,3 +224,6 @@ __marimo__/
 /local-data/
 /backups/
 /exports/
+
+# Generated PDF examples and local validation artifacts
+/output/pdf/

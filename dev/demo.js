@@ -140,6 +140,17 @@ async function callWS(message) {
     try { localStorage.setItem(DEMO_VIEWS_KEY,JSON.stringify(candidate)); } catch { failure('preferences_save_failed'); }
     demoViews = candidate; emit(); return copy(demoViews);
   }
+  if(command === 'pdf') {
+    const ids=message.record_ids;
+    if(!Array.isArray(ids) || !ids.length || ids.length>100 || ids.some(id=>typeof id !== 'string') || new Set(ids).size !== ids.length || typeof message.include_notes !== 'boolean' || !['de','en'].includes(message.language)) failure('validation_error');
+    const byId=new Map(decorated(devices).map(record=>[record.id,record]));
+    if(ids.some(id=>!byId.has(id))) failure('not_found');
+    // The loopback development server uses the same offline PDF renderer as HA.
+    const response=await fetch('/dev/pdf',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({records:ids.map(id=>byId.get(id)),include_notes:message.include_notes,language:message.language})});
+    let result;try{result=await response.json();}catch{failure('pdf_failed');}
+    if(!response.ok) failure(result?.error?.code || 'pdf_failed');
+    return result;
+  }
   if(command === 'ha_devices') return {devices:haDevices.map(device=>({...copy(device),...organizationFromHA(device),record_ids:devices.filter(record=>record.links.some(link=>link.ha_device_id === device.id)).map(record=>record.id)}))};
   if(command === 'save') {
     ensureRevision(message.expected_revision);

@@ -1,15 +1,69 @@
 # Teststand und praktische Abnahme
 
 Dieser Teststand trennt lokale Prüfungen von Veröffentlichung und praktischer
-Abnahme. **0.1.0b10** speichert Ansichten und Standard zentral pro HA-Konto.
+Abnahme. **0.1.0b11** ersetzt die Druckansicht durch direkte PDF-Downloads.
+**0.1.0b10** speichert Ansichten und Standard zentral pro HA-Konto.
 **0.1.0b9** korrigiert das Öffnen nativer Filterauswahlen und ergänzt
 Standardansichten. **0.1.0b8** ergänzt das Filter-Dropdown und die Inventarwerkzeuge.
-**0.1.0b9** wurde auf HA Core 2026.11.1 installiert und nach Neustart und
-vollständigem Neuladen mit erhaltenen Einträgen und Standardansicht geprüft.
+**0.1.0b10** wurde auf HA Core 2026.11.1 installiert und nach Neustart und
+vollständigem Neuladen mit erhaltenen Einträgen und zentralen Ansichten geprüft.
 Automatisierte Prüfungen verwenden synthetische Daten. Zusätzlich wurden ein
 reales QR-Foto lokal und die Fotoaufnahme auf dem Ziel-iPhone geprüft.
 Private Fotos und Codeinhalte werden nicht im Repository dokumentiert.
 Die vollständige praktische Abnahme steht aus.
+
+## Lokale Abschlussprüfung von 0.1.0b11 am 10. November 2026
+
+- **473 Python-Tests** und **250 JavaScript-Tests** bestanden.
+- Isolierter HA-Core-Lauf: **19 Prüfungen** bestanden. Alle **10** versionierten
+  Web-Dateien, einschließlich `pdf.js` anstelle von `print.js`, antworteten mit
+  HTTP 200. Keine Integrationsfehler; die Quelldateien blieben während des Laufs
+  unverändert. SHA-256 der getesteten Integrationsdateien:
+  `b15eccea7b6cece888557157f3fecac9dfb456611d9378bef41c13855902262b`.
+- Browserprüfung am Desktop und bei **390 × 844 Pixeln** mit vier echten
+  PDF-Downloads bestanden: Einzelkarte ohne Notizen (1 Seite), mit Notizen
+  (1 Seite), zwei gefilterte Geräte (2 Seiten) und ein markiertes Gerät (1 Seite).
+  Die Dateien wurden mit `pypdf` auf genaue Gerätenamen, Notizumfang, QR-Inhalt und
+  manuellen Matter-Code geprüft. Kein Popup, keine Warnungen oder Fehler in der
+  Browserkonsole, kein horizontales Überlaufen. Der mobile Dialog passte mit
+  erreichbarem Footer in 844 Pixel Höhe; Notizen waren bei jedem neuen Export
+  zunächst wieder ausgeschaltet.
+- PDF-Tests prüfen echte PDF-Dokumente, getrennten Original-QR und manuellen
+  Matter-Code, führende Nullen, eingebettete Unicode-Schriften, Notiz-Opt-in,
+  Seitenumbrüche und vollständige lange Codeinhalte. Begrenzte QR-Ressourcen
+  erzeugen einen sichtbaren Textrückfall; Ausgabe-, Text- und Seitenlimits liefern
+  sichere Fehler statt gekürzter Dokumente.
+- Managerprüfungen sichern die genaue Geräteauswahl und Reihenfolge, aktuelle
+  HA-Namen und Räume, fehlende IDs ohne Teil- oder Gesamtexport sowie unverändertes
+  Inventar ab. Abgebrochene Rendering-Aufträge werden vor dem Entladen beendet;
+  Fehlerdiagnostik enthält keine eingereichten Codewerte.
+- **22 PDF-Paneltests** prüfen leichte ID-/Namens-Snapshots ohne kopierte Codes,
+  genaue Anfrageparameter, Notizen zunächst aus, Doppelklickschutz und Download
+  ohne Popup oder Browser-Druckaufruf. Schließen während der Erstellung,
+  Disconnect und Kontowechsel verhindern verspätete Downloads und Änderungen an
+  einem späteren Entwurf. Inkonsistente Antworten werden nicht heruntergeladen.
+- **19 Download-Helfertests** prüfen unter anderem MIME, Dateinamen, Anzahl,
+  Base64-/Bytekonsistenz, PDF-Kennung und die begrenzte Lebensdauer der Blob-URL.
+  **Download gestartet** wird nicht als dauerhaft gespeicherte Datei ausgegeben.
+- Der Loopback-Vorschau-Server bestand **13 HTTP-Prüfungen** mit synthetischen
+  Daten und echter PDF-Erzeugung: Host-/Origin-Grenzen, 4-MiB-Anfragelimit,
+  Ablehnung von Chunked-Requests, generische Fehler, `no-store`, keine CORS-Freigabe
+  und keine Request-/Inhaltslogs. Dabei wurde Home Assistant nicht gestartet.
+
+Die Vorschau verwendet denselben Renderer wie die Integration. Der Ablauf für
+reproduzierbare synthetische PDFs und Raster-/QR-Prüfungen steht im
+[Entwicklungsleitfaden](../PROJECT.md#oberflächenvorschau). Das erzeugte
+Beispieldokument umfasst **3 Seiten und 49.117 Bytes**; die drei gerasterten
+Matter-, HomeKit- und Z-Wave-QRs wurden exakt auf ihren Originalinhalt zurückgelesen.
+ReportLab- und Bitstream-Vera-Lizenztexte werden unverändert mitgeliefert; siehe
+[Herkunft](PROVENANCE.md#pdf-generation-and-fonts).
+
+Die iOS-Unterstützung für Download und Teilen ist anhand der offiziellen
+Companion-App-Quellen geprüft; dies ersetzt keinen physischen PDF-Downloadtest.
+Beta 11 ist noch nicht veröffentlicht oder im Zielsystem installiert.
+PDF-Speichern/Teilen auf dem physischen Ziel-iPhone und PDF-Download auf Android,
+Livekamera und vollständiger HA-Restore bleiben eigene praktische Abnahmen.
+[Versionshinweise](releases/0.1.0b11.md) · [Bedienung](USAGE.de.md).
 
 ## Lokale Abschlussprüfung von 0.1.0b10 am 10. November 2026
 
@@ -47,10 +101,13 @@ Die vollständige praktische Abnahme steht aus.
 
 Die Einstellungsdatei `.storage/setup_code_manager_preferences` wird mit der
 HA-Konfiguration gesichert; Inventar und JSON-/CSV-Austauschformat bleiben
-unverändert. Dieser Stand ist noch nicht veröffentlicht oder im Zielsystem
-installiert. Die tatsächliche Synchronisierung eines HA-Kontos zwischen Mac und
-iPhone wird nach Installation gesondert geprüft. Physischer iPhone-Nachtest und
-vollständiger HA-Restore bleiben offen.
+unverändert. Beta 10 wurde veröffentlicht und auf **HA Core 2026.11.1** installiert.
+Nach Neustart und vollständigem Neuladen waren **13 Einträge** erhalten; alle
+waren als **Code gespeichert** gekennzeichnet. Die Ansicht **Home** wurde aus dem
+Browser zentral übernommen.
+Zwei getrennte Browser-Sitzungen unter unterschiedlichen HA-Adressen prüften
+denselben Kontokatalog; dies ist keine Abnahme auf dem physischen iPhone.
+Physischer iPhone-Nachtest und vollständiger HA-Restore bleiben offen.
 [Versionshinweise](releases/0.1.0b10.md) · [Bedienung](USAGE.de.md).
 
 ## Lokale Abschlussprüfung von 0.1.0b9 am 10. November 2026
@@ -484,7 +541,12 @@ nicht geändert.
 7. Die alte Integration gegebenenfalls parallel installiert lassen und prüfen,
    dass ihre Daten unverändert bleiben. Seit 0.1.0b6 sind ihre Übernahmehinweise
    und -Buttons aus der Oberfläche entfernt.
-8. Vollständigen HA-Backup-/Restore-Test gemäß [Sicherungsanleitung](BACKUP.de.md)
+8. Einzelne, gefilterte und markierte Geräte direkt als PDF herunterladen, zunächst
+   ohne und danach mit Notizen. Auf dem iPhone Download und **Teilen → In Dateien
+   sichern** prüfen, die gesicherte Datei öffnen und Original-QR sowie manuellen
+   Matter-Code vergleichen. Abbruch während der Erstellung und erneuten Versuch
+   testen. Ein gestarteter Download allein belegt keine dauerhaft gespeicherte Datei.
+9. Vollständigen HA-Backup-/Restore-Test gemäß [Sicherungsanleitung](BACKUP.de.md)
    durchführen. Die Ergebnisse der Vorabversion entscheiden über weitere Betas
    und eine spätere stabile Veröffentlichung.
 

@@ -1,6 +1,8 @@
 """Exercise persistence and registry behavior with actual Home Assistant helpers."""
 
 import asyncio
+import base64
+import io
 import json
 from copy import deepcopy
 from threading import Event
@@ -15,7 +17,9 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import floor_registry as fr
 from homeassistant.helpers import label_registry as lr
+from pypdf import PdfReader
 
+from custom_components.setup_code_manager.device_pdf import MAX_PDF_BYTES, DevicePDFError
 from custom_components.setup_code_manager.inventory import new_record
 from custom_components.setup_code_manager.manager import InventoryError, SetupCodesManager
 from custom_components.setup_code_manager.preferences import validate_preferences
@@ -47,6 +51,173 @@ async def manager(tmp_path):
     yield manager
     manager.async_unload()
     await hass.async_stop(force=True)
+
+
+async def test_pdf_snapshot_uses_live_ha_identity_matter_manual_value_and_does_not_mutate_inventory(
+    manager, monkeypatch
+):
+    device = add_device(manager)
+    area = ar.async_get(manager.hass).async_create("Aktuelle Küche")
+    dr.async_get(manager.hass).async_update_device(
+        device.id, name_by_user="Aktueller Name", area_id=area.id
+    )
+    saved = await manager.async_save(
+        new_record(
+            "Stored name",
+            links=[{"ha_device_id": device.id}],
+            notes="Synthetic private note",
+            codes=[{"protocol": "matter", "value": "MT:Y.K9042C00KA0648G00"}],
+        ),
+        revision(manager),
+    )
+    before = manager.store.data
+    exports = {format: manager.export(format)["content"] for format in ("json", "csv")}
+    notifications = []
+    monkeypatch.setattr(manager, "_notify", lambda: notifications.append(True))
+    result = await manager.async_export_pdf([saved["id"]])
+    document = base64.b64decode(result["content"], validate=True)
+    assert result["mime"] == "application/pdf" and result["encoding"] == "base64"
+    assert result["byte_length"] == len(document) and result["count"] == 1
+    assert result["filename"].startswith("setup-code-manager-device-cards-") and result[
+        "filename"
+    ].endswith(".pdf")
+    text = "\n".join(page.extract_text() for page in PdfReader(io.BytesIO(document)).pages)
+    assert "Aktueller Name" in text and "Aktuelle Küche" in text
+    assert "3497-011-2332" in text and "MT:Y.K9042C00KA0648G00" in text
+    assert "Synthetic private note" not in text
+    assert manager.store.data == before and notifications == []
+    assert all(manager.export(format)["content"] == content for format, content in exports.items())
+
+
+async def test_pdf_selection_can_include_archive_and_preserves_requested_order(manager):
+    first = await manager.async_save(new_record("First"), revision(manager))
+    second = await manager.async_save(new_record("Second"), revision(manager))
+    await manager.async_archive(second["id"], True, revision(manager))
+    result = await manager.async_export_pdf([second["id"], first["id"]], language="en")
+    reader = PdfReader(io.BytesIO(base64.b64decode(result["content"])))
+    assert result["count"] == 2 and len(reader.pages) == 2
+    assert "Second" in reader.pages[0].extract_text() and "First" in reader.pages[1].extract_text()
+
+
+@pytest.mark.parametrize(
+    "selection", [None, [], "a", [False], [1], ["bad\nid"], ["a", "a"], ["a"] * 101]
+)
+async def test_invalid_pdf_selection_is_rejected_before_executor(manager, selection, monkeypatch):
+    def must_not_render(*_args):
+        pytest.fail("Invalid selection reached renderer")
+
+    monkeypatch.setattr(
+        "custom_components.setup_code_manager.manager.build_device_pdf", must_not_render
+    )
+    with pytest.raises(ValueError):
+        await manager.async_export_pdf(selection)
+
+
+async def test_missing_pdf_id_rejects_whole_selection_without_silent_partial_export(
+    manager, monkeypatch
+):
+    saved = await manager.async_save(new_record("Existing"), revision(manager))
+
+    def must_not_render(*_args):
+        pytest.fail("Partial selection reached renderer")
+
+    monkeypatch.setattr(
+        "custom_components.setup_code_manager.manager.build_device_pdf", must_not_render
+    )
+    with pytest.raises(InventoryError, match="not_found"):
+        await manager.async_export_pdf([saved["id"], "missing"])
+
+
+async def test_pdf_executor_does_not_hold_inventory_lock_and_keeps_its_original_snapshot(
+    manager, monkeypatch
+):
+    saved = await manager.async_save(new_record("Snapshot name"), revision(manager))
+    entered, release = Event(), Event()
+    snapshots = []
+
+    def blocked(records, _language, _notes):
+        assert not manager._lock.locked()
+        snapshots.append(deepcopy(records))
+        entered.set()
+        if not release.wait(timeout=5):
+            raise RuntimeError("Synthetic render not released")
+        return b"%PDF-1.4\nSYNTHETIC"
+
+    monkeypatch.setattr("custom_components.setup_code_manager.manager.build_device_pdf", blocked)
+    task = asyncio.create_task(manager.async_export_pdf([saved["id"]]))
+    try:
+        assert await asyncio.to_thread(entered.wait, 3)
+        saved["name"] = "Changed during rendering"
+        await manager.async_save(saved, revision(manager))
+        assert manager.store.get(saved["id"])["name"] == "Changed during rendering"
+    finally:
+        release.set()
+    await task
+    assert snapshots[0][0]["name"] == "Snapshot name"
+
+
+async def test_cancelled_pdf_thread_is_drained_before_shutdown_and_new_requests_are_blocked(
+    manager, monkeypatch
+):
+    saved = await manager.async_save(new_record("Cancellation"), revision(manager))
+    before = manager.store.data
+    entered, release = Event(), Event()
+
+    def blocked(*_args):
+        entered.set()
+        if not release.wait(timeout=5):
+            raise RuntimeError("Synthetic render not released")
+        return b"%PDF-1.4\nSYNTHETIC"
+
+    monkeypatch.setattr("custom_components.setup_code_manager.manager.build_device_pdf", blocked)
+    task = asyncio.create_task(manager.async_export_pdf([saved["id"]]))
+    shutdown = None
+    try:
+        assert await asyncio.to_thread(entered.wait, 3)
+        for _ in range(2):
+            task.cancel()
+            await asyncio.sleep(0)
+        shutdown = asyncio.create_task(manager.async_shutdown())
+        await asyncio.sleep(0)
+        assert not task.done() and not shutdown.done()
+        assert manager._pdf_lock.locked()
+    finally:
+        release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    await shutdown
+    assert manager.store.data == before and not manager._pdf_lock.locked()
+    with pytest.raises(InventoryError, match="not_loaded"):
+        await manager.async_export_pdf([saved["id"]])
+
+
+@pytest.mark.parametrize(
+    "error,expected",
+    [
+        (DevicePDFError("pdf_too_large"), "pdf_too_large"),
+        (RuntimeError("SYNTHETIC_SECRET"), "pdf_failed"),
+    ],
+)
+async def test_pdf_renderer_errors_are_sanitized(manager, monkeypatch, error, expected):
+    saved = await manager.async_save(new_record("Failure"), revision(manager))
+
+    def failed(*_args):
+        raise error
+
+    monkeypatch.setattr("custom_components.setup_code_manager.manager.build_device_pdf", failed)
+    with pytest.raises(InventoryError, match=expected) as raised:
+        await manager.async_export_pdf([saved["id"]])
+    assert "SYNTHETIC_SECRET" not in str(raised.value)
+
+
+async def test_pdf_manager_enforces_response_byte_limit(manager, monkeypatch):
+    saved = await manager.async_save(new_record("Bounded response"), revision(manager))
+    monkeypatch.setattr(
+        "custom_components.setup_code_manager.manager.build_device_pdf",
+        lambda *_args: b"%PDF-" + b"x" * MAX_PDF_BYTES,
+    )
+    with pytest.raises(InventoryError, match="pdf_too_large"):
+        await manager.async_export_pdf([saved["id"]])
 
 
 async def test_saved_preferences_follow_account_across_manager_reload_without_inventory_change(
