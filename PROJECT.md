@@ -18,12 +18,11 @@ angelegt.
 
 ## Projektstand
 
-Der lokale Entwicklungsstand **0.1.0b4** ergänzt manuelle Matter-Einrichtungscodes,
-einen grünen Speicherstatus und automatisch übernommene HA-Namen und Räume.
-Installation und praktische Abnahme auf dem Zielsystem stehen noch aus.
-Die [Versionshinweise](docs/releases/0.1.0b4.md)
+Der lokale Entwicklungsstand **0.1.0b5** korrigiert das Laden zwischengespeicherter
+Oberflächendateien nach Updates. Die Korrektur ist lokal geprüft; die praktische
+Abnahme auf dem Zielsystem steht noch aus. Die [Versionshinweise](docs/releases/0.1.0b5.md)
 beschreiben Umfang und Grenzen. Zuletzt wurde die veröffentlichte
-[0.1.0b3](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b3)
+[0.1.0b4](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b4)
 auf dem Zielsystem installiert.
 Dies ist noch keine stabile Version. Der Standardbranch `main` bleibt beim
 bereits veröffentlichten und auf HA OS geprüften Stand **0.1.0b1**.
@@ -89,12 +88,28 @@ zuletzt bekannten Angaben und Codes erhalten. Eine Formatmigration ist nicht nö
 Automatisierte Tests und Browserabnahme siehe [Teststand](docs/TESTING.de.md).
 Weitere Betas stammen vom Featurebranch; `main` bleibt bei `0.1.0b1`.
 
+Am 10. November 2026 wurde **0.1.0b4** nach einer verschlüsselten lokalen Sicherung
+auf dem Zielsystem mit **HA Core 2026.11.1** installiert. Nach dem Neustart waren
+neun Geräte sichtbar, davon sechs mit gespeicherten Codes. Verknüpfte Namen und
+Räume wurden aus HA aktualisiert. Safari lud jedoch eine ältere Übersetzungsdatei
+zum neuen Panel; sichtbar war unter anderem `codeStored` statt **Gespeichert**.
+Ein frischer Abruf der Übersetzungen enthielt die richtigen Texte.
+
+**0.1.0b5** gibt dem Panel und sämtlichen nachgeladenen JavaScript-, CSS- und
+Decoderdateien einen gemeinsamen versionsbezogenen Pfad. Dadurch erhalten auch
+verschachtelte Importe nach einem Update neue Adressen. Inventar und Codes
+bleiben unverändert; eine Formatmigration ist nicht erforderlich. Die abschließenden
+Prüfungen dieser Korrektur werden im Teststand getrennt von Beta 4 dokumentiert.
+
 Die vorhandene Livekamera benötigt HTTPS. Fotoaufnahme über HTTP bleibt verfügbar;
 ein unterstützter öffentlicher Ladeweg zum nativen Companion-Scanner besteht für
 Custom Panels derzeit nicht. Es wurden keine Netzwerkeinstellungen geändert.
+Ein bereits aktiver Nabu-Casa-Fernzugang mit gültigem HTTPS wurde gefunden und
+bis zur Anmeldeseite geprüft. Anmeldung und praktische Livekamera-Abnahme auf dem
+iPhone stehen noch aus; dafür ist keine neue Tailscale-Konfiguration erforderlich.
 
 Für Tests über ein benutzerdefiniertes Repository im integrierten Marketplace von
-HA 2026.11 ist für die neue Funktion die GitHub-Vorabversion `0.1.0b4` ausdrücklich in der Versionsauswahl
+HA 2026.11 ist für die Cachekorrektur die GitHub-Vorabversion `0.1.0b5` ausdrücklich in der Versionsauswahl
 zu wählen. Vorabversionen müssen **vor dem Installieren** eingeschlossen werden;
 Name, Versionsnummer und die neue Domain `setup_code_manager` sind zu prüfen.
 Der Standardbranch `main` enthält jetzt ebenfalls `setup_code_manager`.

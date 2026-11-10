@@ -1,8 +1,12 @@
 """Real HA config-entry lifecycle, panel registration and configuration flows."""
 
 import asyncio
+import posixpath
+import re
+import shutil
 from types import MappingProxyType, SimpleNamespace
 from unittest.mock import AsyncMock, patch
+from urllib.parse import urljoin
 
 import pytest
 from homeassistant.components import frontend
@@ -31,6 +35,7 @@ from custom_components.setup_code_manager.store import SetupCodesStore
 @pytest.fixture
 async def hass(tmp_path):
     instance = HomeAssistant(str(tmp_path))
+    instance.http = SimpleNamespace(async_register_static_paths=AsyncMock())
     instance.config_entries = ConfigEntries(instance, {})
     await instance.config_entries.async_initialize()
     await ar.async_load(instance)
@@ -114,8 +119,9 @@ async def test_static_route_registered_once_and_can_retry_after_failure(hass):
     await panel.async_register_static(hass)
     assert register.await_count == 2
     config = register.call_args.args[0][0]
-    assert config.url_path == PANEL_STATIC_URL_PATH
+    assert config.url_path == f"{PANEL_STATIC_URL_PATH}/{panel.static_asset_version()}"
     assert config.cache_headers is False
+    assert await panel.async_register_static(hass) == config.url_path
 
 
 async def test_panel_is_admin_only_and_uses_versioned_es_module(hass):
@@ -124,13 +130,91 @@ async def test_panel_is_admin_only_and_uses_versioned_es_module(hass):
     assert registered.require_admin is True
     custom = registered.config["_panel_custom"]
     assert custom["name"] == "setup-code-manager-panel"
-    assert custom["module_url"].startswith(f"{PANEL_STATIC_URL_PATH}/panel.js?v=")
+    assert custom["module_url"] == f"{hass.data[panel._STATIC_MARKER]}/panel.js"
     assert not custom["embed_iframe"]
     assert not custom["trust_external"]
     # Re-registering a panel is safe when an integration is reloaded.
     await panel.async_register_panel(hass)
     panel.async_unregister_panel(hass)
     assert not frontend.async_panel_exists(hass, PANEL_URL_PATH)
+
+
+def frontend_dependency_urls(entry_url, www):
+    """Resolve the actual module imports and CSS URL like a browser would."""
+    resolved = {}
+    pending = [("panel.js", entry_url)]
+    while pending:
+        path, url = pending.pop()
+        if path in resolved:
+            continue
+        resolved[path] = url
+        if not path.endswith(".js"):
+            continue
+        source = (www / path).read_text()
+        imports = re.findall(r"(?:from\s+|import\s+)[\"'](\.[^\"']+)[\"']", source)
+        resources = re.findall(r"new URL\(\s*[\"'](\.[^\"']+)[\"']\s*,\s*import\.meta\.url", source)
+        for relative in imports + resources:
+            target = posixpath.normpath(posixpath.join(posixpath.dirname(path), relative))
+            pending.append((target, urljoin(url, relative)))
+    return resolved
+
+
+async def test_nested_module_and_css_urls_change_when_only_a_translation_changes(hass, tmp_path):
+    www = tmp_path / "assets"
+    shutil.copytree(panel.WWW_DIR, www)
+    register = AsyncMock()
+    hass.http = SimpleNamespace(async_register_static_paths=register)
+    with patch.object(panel, "WWW_DIR", www):
+        await panel.async_register_static(hass)
+        await panel.async_register_panel(hass)
+        entry_url = hass.data[frontend.DATA_PANELS][PANEL_URL_PATH].config["_panel_custom"][
+            "module_url"
+        ]
+        before = frontend_dependency_urls(entry_url, www)
+        assert set(before) == {
+            "panel.js",
+            "panel.css",
+            "i18n.js",
+            "icons.js",
+            "scanner.js",
+            "qr.js",
+            "vendor/jsQR.js",
+        }
+        # Simulate a second HA startup after an update which changes only i18n.
+        translation = www / "i18n.js"
+        translation.write_text(translation.read_text() + "\n// New translation fixture\n")
+        hass.data.pop(panel._STATIC_MARKER)
+        await panel.async_register_static(hass)
+        await panel.async_register_panel(hass)
+        next_url = hass.data[frontend.DATA_PANELS][PANEL_URL_PATH].config["_panel_custom"][
+            "module_url"
+        ]
+        after = frontend_dependency_urls(next_url, www)
+    assert before["panel.js"] != after["panel.js"]
+    stale = [asset for asset in before if before[asset] == after[asset]]
+    assert stale == [], f"Browser module cache still reuses these asset URLs: {stale}"
+    first_route, second_route = [call.args[0][0].url_path for call in register.call_args_list]
+    assert first_route != second_route
+    assert all(url.startswith(first_route + "/") for url in before.values())
+    assert all(url.startswith(second_route + "/") for url in after.values())
+
+
+async def test_panel_reload_reuses_the_registered_bundle_url_without_rehashing(hass):
+    registered_url = await panel.async_register_static(hass)
+    with patch.object(
+        panel, "static_asset_version", side_effect=AssertionError("unexpected rehash")
+    ):
+        await panel.async_register_panel(hass)
+        first = hass.data[frontend.DATA_PANELS][PANEL_URL_PATH].config["_panel_custom"][
+            "module_url"
+        ]
+        panel.async_unregister_panel(hass)
+        await panel.async_register_panel(hass)
+        second = hass.data[frontend.DATA_PANELS][PANEL_URL_PATH].config["_panel_custom"][
+            "module_url"
+        ]
+    assert first == second == f"{registered_url}/panel.js"
+    hass.http.async_register_static_paths.assert_awaited_once()
 
 
 async def test_config_flow_defaults_and_single_instance(hass):

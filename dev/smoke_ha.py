@@ -25,6 +25,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from importlib.metadata import version
 from pathlib import Path
+from urllib.parse import urljoin
 
 sys.dont_write_bytecode = True
 
@@ -150,8 +151,14 @@ async def smoke(directory: str, results: dict, evidence: RuntimeEvidence) -> Non
                 async with client.get(base + "/api/") as response:
                     assert response.status == 401
                 results["checks"]["anonymous_api_denied"] = True
-                assert hass.data["frontend_panels"][DOMAIN].require_admin is True
+                registered_panel = hass.data["frontend_panels"][DOMAIN]
+                assert registered_panel.require_admin is True
                 results["checks"]["panel_requires_admin"] = True
+                module_url = registered_panel.config["_panel_custom"]["module_url"]
+                assert re.fullmatch(
+                    r"/setup_code_manager_static/[A-Za-z0-9._-]+/panel.js", module_url
+                )
+                asset_base = urljoin(base + module_url, "./")
                 assets = [
                     "panel.js",
                     "panel.css",
@@ -162,7 +169,7 @@ async def smoke(directory: str, results: dict, evidence: RuntimeEvidence) -> Non
                     "qr.js",
                 ]
                 for asset in assets:
-                    async with client.get(base + "/setup_code_manager_static/" + asset) as response:
+                    async with client.get(urljoin(asset_base, asset)) as response:
                         assert response.status == 200 and await response.read()
                 results["checks"]["static_assets_http_200"] = assets
                 results["stage"] = "websocket"

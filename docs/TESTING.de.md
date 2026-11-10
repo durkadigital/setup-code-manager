@@ -1,15 +1,40 @@
 # Teststand und praktische Abnahme
 
-Dieser Teststand beschreibt den lokalen Entwicklungsstand **0.1.0b4**, die zuletzt
-installierte [0.1.0b3](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b3)
+Dieser Teststand beschreibt die lokale Cachekorrektur **0.1.0b5**, die zuletzt
+installierte [0.1.0b4](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b4)
 und die getrennt dokumentierten früheren Betas. Installation
-und praktische Abnahme von `0.1.0b4` stehen noch aus; der Standardbranch `main`
+und praktische Abnahme von `0.1.0b5` stehen noch aus; der Standardbranch `main`
 bleibt bei `0.1.0b1`. Automatisierte Prüfungen verwenden synthetische Daten. Zusätzlich
 wurden ein reales QR-Foto lokal und die Fotoaufnahme auf dem Ziel-iPhone geprüft.
 Private Fotos und Codeinhalte werden nicht im Repository dokumentiert.
 Die vollständige praktische Abnahme steht aus.
 
-## Lokaler Entwicklungsstand 0.1.0b4
+## Lokaler Entwicklungsstand 0.1.0b5
+
+Nach der Installation von Beta 4 konnte Safari ein neues Panel mit einer älteren,
+unversioniert importierten Übersetzungsdatei kombinieren. Dadurch erschien etwa
+`codeStored` statt **Gespeichert**. Ein frischer Abruf der Übersetzungsdatei
+enthielt den korrekten Text; die gespeicherten Codes waren weiterhin vorhanden.
+
+Beta 5 verwendet einen gemeinsamen versionsbezogenen Pfad für das Panel und
+alle nachgeladenen JavaScript-, CSS- und Decoderdateien, einschließlich
+verschachtelter Importe. Die Korrektur betrifft das Laden der Oberfläche;
+Speicherformat, Inventar und Codes bleiben unverändert.
+
+**Abschlussprüfung am 10. November 2026:** 299 Python- und 82 JavaScript-Tests
+bestanden. Ein Regressionstest ändert nur eine Übersetzungsdatei und prüft, dass
+alle sieben tatsächlich referenzierten JS-/CSS-/Decoderadressen wechseln; vor
+der Korrektur blieb dieser Test rot. Ein weiterer Test prüft die stabile Basis
+bei erneutem Einrichten. Ruff, Format- und Whitespace-Prüfung bestanden.
+
+Der isolierte Lauf mit echtem HA Core bestand 13 Prüfungen. Alle sieben Assets
+antworteten unter der tatsächlich registrierten Versionsbasis mit HTTP 200;
+Adminschutz, Speichern, Export und Neuladen bestanden, ohne Integrationsfehler.
+Im Zielsystem ist nach dem Update besonders zu prüfen, dass die neuen Texte auch
+in einer zuvor verwendeten Safari-/Companion-Sitzung korrekt erscheinen.
+[Versionshinweise](releases/0.1.0b5.md).
+
+## Lokale Prüfung von 0.1.0b4 am 10. November 2026
 
 Die Beta ergänzt drei zusammengehörige Funktionen:
 
@@ -217,7 +242,32 @@ scrollbar, Schließen-Schaltfläche erreichbar und Rückkehr zur Liste erfolgrei
 Dies ist ein Browsertest am laufenden HA-System; die ausdrückliche Bestätigung
 des korrigierten Layouts auf dem physischen iPhone steht noch aus.
 
+## Installation und Prüfung von 0.1.0b4 auf Home Assistant OS
+
+Am 10. November 2026 wurde vor dem Update eine **verschlüsselte lokale HA-Sicherung
+mit 40,21 MB** erstellt. Anschließend wurde **0.1.0b4** auf dem Zielsystem mit
+**HA Core 2026.11.1** installiert und Home Assistant neu gestartet. Danach waren
+**neun Geräte, davon sechs mit gespeicherten Codes**, sichtbar. Die verknüpften
+Geräte zeigten die übernommenen aktuellen Namen und Räume aus Home Assistant.
+
+In Safari erschien jedoch `codeStored` statt **Gespeichert**: Das neue Panel
+verwendete noch eine zwischengespeicherte ältere Übersetzungsdatei. Ein frischer
+Abruf dieser Datei enthielt die korrekten Texte. Dieser Befund begrenzt die
+Oberflächenabnahme von Beta 4 und ist Anlass für die Cachekorrektur in Beta 5.
+
+Die Sicherung wurde erstellt, aber nicht wiederhergestellt. Dieser Lauf belegt
+keinen vollständigen Restore und ersetzt nicht die übrigen noch offenen
+Funktions- und Smartphone-Tests. Private Adressen, Gerätenamen, Codewerte und
+Sicherungsgeheimnisse werden nicht dokumentiert.
+
 ## Direktscan und HTTP
+
+Am 10. November 2026 wurde auf dem Zielsystem ein bereits aktiver Nabu-Casa-
+Fernzugang gefunden. Dessen gültige HTTPS-Adresse führte bis zur HA-Anmeldeseite.
+Eine Anmeldung in dieser HTTPS-Sitzung sowie die Livekamera-Abnahme auf dem
+physischen iPhone stehen noch aus. Dafür ist keine zusätzliche Tailscale- oder
+Netzwerkkonfiguration erforderlich. Der Test muss über die HTTPS-Adresse erfolgen;
+eine weiterhin verwendete interne HTTP-Adresse stellt keinen sicheren Browserkontext her.
 
 Die vorhandene Browser-Livekamera benötigt HTTPS bzw. einen sicheren Kontext.
 Über HTTP bleibt die bestätigte System-Fotoaufnahme verfügbar. Im geprüften
@@ -265,9 +315,10 @@ nicht geändert.
    durchführen. Die Ergebnisse der Vorabversion entscheiden über weitere Betas
    und eine spätere stabile Veröffentlichung.
 
-Offen sind Export/Import im Zielsystem, ein vollständiger HA-Restore und die weiteren
-Smartphone-/Companion-App-Abnahmen einschließlich des Layouts auf dem physischen
-iPhone und der neuen Funktionen aus `0.1.0b4`. Ein automatisierter
+Offen sind Export/Import im Zielsystem, ein vollständiger HA-Restore, die
+Cachekorrektur aus `0.1.0b5` und die weiteren Smartphone-/Companion-App-Abnahmen
+einschließlich HTTPS-Livekamera, Detail-Layout und verbleibender Funktionen aus
+`0.1.0b4` auf dem physischen iPhone. Ein automatisierter
 Decoder-Test belegt die Erkennung der Testbilder, nicht die Qualität aller realen
 Kameras, Ausdrucke und Lichtverhältnisse.
 

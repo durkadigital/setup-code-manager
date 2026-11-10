@@ -2,22 +2,20 @@
 
 Geräte und Einrichtungscodes in Home Assistant verwalten, lokal scannen und sichern.
 
-**Entwicklungsstand [0.1.0b4](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b4): Matter-Zifferncodes, grüner Speicherstatus und Gerätenamen aus Home Assistant.
-Lokal geprüft; Installation und praktische Abnahme auf dem Zielsystem stehen noch aus.
+**Entwicklungsstand [0.1.0b5](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b5): zusammenpassende Oberflächendateien nach Updates.
+Die Cachekorrektur ist lokal geprüft; die Abnahme auf dem Zielsystem steht noch aus.
 Noch keine stabile Version oder allgemeine Katalogaufnahme.**
-Zu gültigen Matter-QR-Codes mit `MT:` erscheint automatisch der passende
-11- oder 21-stellige Einrichtungscode, auch bei bereits gespeicherten Einträgen.
-QR-Inhalt und Zifferncode lassen sich getrennt anzeigen und kopieren; beide
-bleiben zunächst maskiert. Der Original-QR bleibt unverändert gespeichert.
-Ein grünes **Gespeichert** kennzeichnet vorhandene Codes. Verknüpfte Geräte
-übernehmen Namen und Räume automatisch aus Home Assistant.
-[Änderungen und Grenzen von Beta 4](docs/releases/0.1.0b4.md).
+Nach einem Update konnte Safari ältere Übersetzungen zu einem neuen Panel laden
+und beispielsweise `codeStored` statt **Gespeichert** anzeigen. Beta 5 lädt das
+Panel und seine weiteren JavaScript-, CSS- und Decoderdateien über einen gemeinsamen
+versionsbezogenen Pfad. [Änderungen und Grenzen von Beta 5](docs/releases/0.1.0b5.md).
 
-Auf dem Zielsystem wurde zuletzt **0.1.0b3** installiert und Home Assistant neu
-gestartet. Danach waren fünf Geräte sichtbar, davon zwei mit gespeicherten Codes.
-Scrollen und Schließen wurden dort im WebKit-Browser bei 390 × 844 Pixeln geprüft;
-die Bestätigung des Detail-Layouts auf dem physischen iPhone steht noch aus.
+Auf dem Zielsystem wurde am 10. November 2026 nach einer lokalen verschlüsselten
+Sicherung **0.1.0b4** installiert und Home Assistant neu gestartet. Danach waren
+neun Geräte sichtbar, davon sechs mit gespeicherten Codes; verknüpfte HA-Angaben
+wurden aktualisiert. Dabei wurde der oben beschriebene Cachefehler festgestellt.
 Die Fotoaufnahme in der iPhone-Companion-App war bereits mit **0.1.0b2** bestätigt.
+Die Livekamera über den vorhandenen HTTPS-Zugang, weitere Smartphone-Tests,
 Export und vollständige Wiederherstellung im Zielsystem bleiben offen
 ([Teststand](docs/TESTING.de.md)).
 Die Oberfläche ist auf Deutsch und Englisch verfügbar.
@@ -67,7 +65,7 @@ HA-Sicherung anlegen und die ursprüngliche Integration samt Daten erhalten.
 
 ### Über den Marketplace ab Home Assistant 2026.11
 
-Für die Neuerungen ausdrücklich **`0.1.0b4`** auswählen. Falls diese Version noch nicht
+Für die Cachekorrektur ausdrücklich **`0.1.0b5`** auswählen. Falls diese Version noch nicht
 angeboten wird, die Repository-Daten aktualisieren und die Versionsauswahl erneut
 öffnen oder die manuelle Installation unten verwenden.
 
@@ -76,7 +74,7 @@ angeboten wird, die Repository-Daten aktualisieren und die Versionsauswahl erneu
    Repository vom Typ **Integration** hinzufügen. Falls angefordert, GitHub verbinden.
 2. Die Repository-Details öffnen und **vor der Installation** die Option
    **Vorabversionen einschließen** / **Include pre-releases** aktivieren.
-3. Die angebotene Version prüfen: **Setup Code Manager**, **`0.1.0b4`**, neue
+3. Die angebotene Version prüfen: **Setup Code Manager**, **`0.1.0b5`**, neue
    Integrationskennung **`setup_code_manager`**. Wenn noch **Setup Codes** oder eine
    frühere Version angeboten wird, nicht installieren; die
    Repository-Daten aktualisieren und die Versionsauswahl erneut prüfen.
@@ -95,17 +93,17 @@ Details beschreibt die [offizielle Release-Dokumentation](https://contributors.h
 
 ### Alternativ manuell
 
-Nach Veröffentlichung die Version **`0.1.0b4`** auf der
+Nach Veröffentlichung die Version **`0.1.0b5`** auf der
 [Release-Seite](https://github.com/durkadigital/setup-code-manager/releases) auswählen
 und deren **Source code (zip)** laden. Im heruntergeladenen `manifest.json` muss
-`0.1.0b4` stehen.
+`0.1.0b5` stehen.
 
 Den vollständigen Ordner `custom_components/setup_code_manager` nach
 `<HA-Konfiguration>/custom_components/setup_code_manager` kopieren, HA neu starten
 und anschließend **Setup Code Manager** über Geräte & Dienste hinzufügen.
 Der Standardbranch `main` bleibt beim geprüften Stand **`0.1.0b1`** mit der neuen
 Domain `setup_code_manager`. Für die Neuerungen die
-Release-Version **`0.1.0b4`** verwenden. Weitere Betas werden vom Featurebranch
+Release-Version **`0.1.0b5`** verwenden. Weitere Betas werden vom Featurebranch
 veröffentlicht.
 
 Die neue Domain `setup_code_manager` ist von `setup_codes` getrennt. Beide können
@@ -131,6 +129,12 @@ für Custom Panels derzeit keinen unterstützten Ladeweg zum nativen Companion-
 Scanner mit Ergebnisrückgabe. Die App verwendet keine privaten Nachrichtenhandler;
 Netzwerkeinstellungen werden nicht geändert. Für die vorhandene Livekamera ist ein
 gültiger HTTPS-Zugang erforderlich.
+
+Auf dem Zielsystem ist bereits ein Nabu-Casa-Fernzugang mit gültigem HTTPS aktiv;
+die Anmeldeseite wurde erreicht. Anmeldung und Kameratest auf dem Ziel-iPhone
+stehen noch aus. Für diesen Test ist keine neue Tailscale- oder Netzwerkkonfiguration
+erforderlich. Die Companion-App muss dabei tatsächlich die HTTPS-Adresse verwenden.
+
 Unterstützt werden Matter-QRs `MT:`, HomeKit-QRs `X-HM://`, Z-Wave-SmartStart-QRs und
 die jeweiligen manuellen Codes. Gedruckte Ziffern werden nicht per OCR erkannt.
 Zusammengesetzte Matter-QRs mit mehreren Payloads sowie nicht unterstützte optionale
