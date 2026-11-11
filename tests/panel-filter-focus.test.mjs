@@ -322,7 +322,13 @@ test('guided capture focuses each target card without opening the keyboard', asy
     const card = panel.shadowRoot.querySelector(`[data-field="code-value"][data-index="${index}"]`).closest('.editor-code');
     assert.equal(panel.shadowRoot.activeElement === card,true);
     assert.equal(state.scrolledTo === card,true);
-    if (id === 'a') await panel._onClick({target:panel.shadowRoot.querySelector('[data-action="capture-skip"]')});
+    if (id === 'a') {
+      panel._receiveScan('X-HM://SYNTHETIC');
+      assert.match(dialogFeedback(panel).querySelector('[role="alert"]').textContent,/requires a Matter code/);
+      assert.equal(panel.shadowRoot.activeElement?.getAttribute('aria-label'),'Matter');
+      assert.equal(panel._draft.codes[index].value,'');
+      await panel._onClick({target:panel.shadowRoot.querySelector('[data-action="capture-skip"]')});
+    }
   }
   assert.equal(state.focusCalls.some(node => ['input','textarea','select'].includes(node.localName)),false);
 });
@@ -346,3 +352,148 @@ test('rerendering the code editor preserves a code field the user focused and it
   assert.equal(panel.shadowRoot.activeElement === control(panel,'code-value'),true);
   assert.equal(panel.shadowRoot.querySelector('.dialog-body').scrollTop,230);
 });
+
+function dialogFeedback(panel) {
+  const feedback = panel.shadowRoot.querySelector('dialog .dialog-shell > .dialog-feedback');
+  assert.ok(feedback,'Feedback belongs outside the scrolling dialog body.');
+  const siblings = feedback.parentElement.children;
+  assert.equal(siblings[siblings.indexOf(feedback) + 1]?.classList.contains('dialog-foot'),true);
+  return feedback;
+}
+
+function stubPhotoReader(t, read) {
+  for (const [key,value] of Object.entries({
+    Image:undefined,
+    createImageBitmap:async () => ({width:1,height:1,close() {}}),
+    jsQR:read,
+  })) {
+    const original = Object.getOwnPropertyDescriptor(globalThis,key);
+    Object.defineProperty(globalThis,key,{configurable:true,writable:true,value});
+    t.after(() => original ? Object.defineProperty(globalThis,key,original) : delete globalThis[key]);
+  }
+  const createElement = document.createElement;
+  t.mock.method(document,'createElement',tag => tag === 'canvas' ? {
+    getContext() {
+      return {
+        drawImage() {},
+        getImageData:() => ({width:1,height:1,data:new Uint8ClampedArray(4)}),
+      };
+    },
+  } : createElement(tag));
+}
+
+const syntheticMatter = 'MT:00000CQM00KA0648G00';
+const action = (panel,name) => panel.shadowRoot.querySelector(`[data-action="${name}"]`);
+const editableFocus = node => ['input','textarea','select'].includes(node.localName);
+
+test('a photo retry replaces the save or scan error with footer feedback and keeps the code card in place', async t => {
+  const {panel,state} = fixture();
+  panel._selectedId = 'a';
+  panel._renderMain();
+  await panel._onClick({target:action(panel,'edit')});
+  await panel._onClick({target:action(panel,'add-slot')});
+  panel.shadowRoot.getElementById('record-form').reportValidity = () => true;
+  panel._api = async command => {
+    assert.equal(command,'save');
+    throw {code:'conflict'};
+  };
+  await panel._save();
+  const saveFeedback = dialogFeedback(panel);
+  assert.ok(saveFeedback.querySelector('[role="alert"] [data-action="compare-revision"]'));
+
+  let decoded = null, onFile;
+  stubPhotoReader(t,() => decoded);
+  panel._chooseFile = (_accept, select) => { onFile = select; };
+  state.focusCalls.length = 0;
+  const takePhoto = async () => {
+    const photo = action(panel,'code-photo');
+    photo.focus();
+    panel.shadowRoot.querySelector('.dialog-body').scrollTop = 230;
+    await panel._onClick({target:photo});
+    const pending = onFile({name:'synthetic.jpg',type:'image/jpeg',size:12});
+    const progress = dialogFeedback(panel);
+    assert.match(progress.querySelector('[role="status"]').textContent,/Looking for a QR code/);
+    assert.equal(progress.querySelector('[data-action="compare-revision"]'),null);
+    assert.equal(panel.shadowRoot.querySelector('.dialog-body').scrollTop,230);
+    await pending;
+    assert.equal(panel.shadowRoot.querySelector('.dialog-body').scrollTop,230);
+    assert.equal(panel.shadowRoot.activeElement === control(panel,'code-value').closest('.editor-code'),true);
+    return dialogFeedback(panel);
+  };
+  const error = await takePhoto();
+  assert.match(error.querySelector('[role="alert"]').textContent,/No setup code detected/);
+  assert.equal(error.querySelector('[data-action="compare-revision"]'),null);
+  assert.equal(error.querySelector('.success'),null);
+
+  decoded = {data:syntheticMatter};
+  const success = await takePhoto();
+  assert.match(success.querySelector('[role="status"].success').textContent,/Matter code detected/);
+  assert.equal(success.querySelector('[role="alert"]'),null);
+  assert.equal(control(panel,'code-value').value,syntheticMatter);
+
+  decoded = null;
+  const failedRetry = await takePhoto();
+  assert.ok(failedRetry.querySelector('[role="alert"]'));
+  assert.equal(panel.shadowRoot.querySelector('dialog .notice.success'),null);
+  assert.equal(control(panel,'code-value').value,syntheticMatter);
+  assert.equal(state.focusCalls.some(editableFocus),false);
+});
+
+test('a new device receives live-scan feedback even before it has a code card', async () => {
+  const {panel,state} = fixture();
+  await panel._onClick({target:action(panel,'add')});
+  panel._openModal('scanner');
+  panel._receiveScan('unsupported synthetic value');
+  assert.ok(dialogFeedback(panel).querySelector('[role="alert"]'));
+  assert.equal(panel.shadowRoot.querySelector('.editor-code'),null);
+  assert.equal(panel.shadowRoot.activeElement === panel.shadowRoot.querySelector('.editor-section h3'),true);
+
+  panel._openModal('scanner');
+  panel._receiveScan(syntheticMatter);
+  assert.match(dialogFeedback(panel).querySelector('[role="status"].success').textContent,/Matter code detected/);
+  assert.equal(panel.shadowRoot.activeElement === control(panel,'code-value').closest('.editor-code'),true);
+  assert.notEqual(control(panel,'name').getAttribute('required'),null);
+  assert.equal(state.focusCalls.some(editableFocus),false);
+
+  const code = control(panel,'code-value');
+  code.focus();
+  code.value = 'MT:SYNTHETIC-EDITED';
+  code.selectionStart = code.selectionEnd = code.value.length;
+  code.dispatchEvent({type:'input',bubbles:true});
+  assert.equal(panel._draft.codes[0].value,code.value);
+  assert.equal(panel.shadowRoot.querySelector('dialog .notice.success'),null);
+  assert.equal(control(panel,'code-value') === code,true,'Typing keeps the same input element.');
+  assert.equal(panel.shadowRoot.activeElement === code,true);
+  assert.equal(code.selectionStart,code.value.length);
+  assert.equal(code.selectionEnd,code.value.length);
+});
+
+for (const [decision,acceptsCode] of [['keep-code',false],['replace-code',true]]) {
+  test(`choosing ${decision} reports success only when the scanned code was accepted`, async () => {
+    const {panel,state} = fixture();
+    const previousCode = 'MT:Y.K9042C00KA0648G00';
+    panel._devices[0].codes = [{id:'stored',protocol:'matter',value:previousCode,label:'Synthetic'}];
+    panel._selectedId = 'a';
+    panel._renderMain();
+    await panel._onClick({target:action(panel,'edit')});
+    state.focusCalls.length = 0;
+    panel._openModal('scanner');
+    panel._receiveScan(syntheticMatter);
+    assert.equal(panel._modal.kind,'code-conflict');
+    await panel._onClick({target:action(panel,decision)});
+    const code = control(panel,'code-value');
+    assert.equal(code.value,acceptsCode ? syntheticMatter : previousCode);
+    assert.equal(code.getAttribute('type'),'password');
+    const success = panel.shadowRoot.querySelector('dialog .notice.success');
+    assert.equal(!!success,acceptsCode);
+    if (acceptsCode) assert.equal(dialogFeedback(panel).contains(success),true);
+    assert.equal(panel.shadowRoot.activeElement === code.closest('.editor-code'),true);
+    assert.equal(state.focusCalls.some(editableFocus),false);
+
+    if (acceptsCode) {
+      await panel._onClick({target:action(panel,'remove-code')});
+      assert.equal(control(panel,'code-value'),null);
+      assert.equal(panel.shadowRoot.querySelector('dialog .notice.success'),null);
+    }
+  });
+}

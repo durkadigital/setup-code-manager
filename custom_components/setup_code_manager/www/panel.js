@@ -151,10 +151,10 @@ class SetupCodeManagerPanel extends HTMLElement {
   _iconButton(action, label, image, attrs = '') {
     return `<button type="button" class="icon-button" data-action="${action}" title="${esc(label)}" aria-label="${esc(label)}" ${attrs} ${this._busyBlocks(action) ? 'disabled' : ''}>${icon(image)}</button>`;
   }
-  _notice(text, style = '', extra = '') { return `<div class="notice ${style}" ${style === 'error' ? 'role="alert"' : ''}>${icon(style === 'success' ? 'check' : style === 'error' || style === 'warning' ? 'warning' : 'info')}<div class="grow">${esc(text)}${extra}</div></div>`; }
+  _notice(text, style = '', extra = '') { return `<div class="notice ${style}" ${style === 'error' ? 'role="alert"' : style === 'success' ? 'role="status"' : ''}>${icon(style === 'success' ? 'check' : style === 'error' || style === 'warning' ? 'warning' : 'info')}<div class="grow">${esc(text)}${extra}</div></div>`; }
   _toast(message) {
     clearTimeout(this._toastTimer);
-    this.shadowRoot.getElementById('toast-root').innerHTML = `<div class="toast">${esc(message)}</div>`;
+    this.shadowRoot.getElementById('toast-root').innerHTML = `<div class="toast" role="status">${esc(message)}</div>`;
     this._toastTimer = setTimeout(() => { this.shadowRoot.getElementById('toast-root').innerHTML = ''; }, 4200);
   }
   _focusSnapshot() {
@@ -590,6 +590,7 @@ class SetupCodeManagerPanel extends HTMLElement {
   _newDraft(record, fromCodeAction = false) {
     this._dialogGeneration++;
     this._codeEditorFromDetails = fromCodeAction;
+    this._focusScanResult = false;
     this._draft = clone(record || blankRecord()); this._baseRecord = clone(this._draft);
     this._baseRevision = this._revision; this._dirty = false; this._detected = null; this._moreOpen = false; this._draftError = ''; this._draftErrorCode = '';
     this._formRevealed.clear(); this._compareRevealed.clear(); this._activeProtocol = this._protocol || 'matter';
@@ -610,14 +611,15 @@ class SetupCodeManagerPanel extends HTMLElement {
     this.shadowRoot.getElementById('modal-root').innerHTML = ''; this._modal = null;
     this._draft = null; this._pendingCodes = null; this._preview = null; this._importSource = null; this._pdfRecords = null; this._pdfNotes = false; this._pdfPending = false;
     this._codeEditorFromDetails = false;
+    this._focusScanResult = false;
     if (closingPDF) this._busy = false;
     if (!preserveCapture) this._captureQueue = null;
     this._formRevealed.clear(); this._compareRevealed.clear();
     const returnAction = returnToCodeAction ? 'edit-codes' : this._selectedId ? 'edit' : 'add';
     this.shadowRoot.querySelector(`[data-action="${returnAction}"]`)?.focus();
   }
-  _modalFrame(title, body, footer = '', wide = false) {
-    return `<dialog ${wide ? 'class="wide"' : ''} aria-labelledby="dialog-title"><div class="dialog-shell"><header class="dialog-head"><h2 id="dialog-title">${esc(title)}</h2>${this._iconButton('close-modal',this._t('close'),'close')}</header><div class="dialog-body">${this._modalError ? this._notice(this._modalError,'error') : ''}${body}</div>${footer ? `<footer class="dialog-foot">${footer}</footer>` : ''}</div></dialog>`;
+  _modalFrame(title, body, footer = '', wide = false, feedback = null) {
+    return `<dialog ${wide ? 'class="wide"' : ''} aria-labelledby="dialog-title"><div class="dialog-shell"><header class="dialog-head"><h2 id="dialog-title">${esc(title)}</h2>${this._iconButton('close-modal',this._t('close'),'close')}</header><div class="dialog-body">${feedback === null && this._modalError ? this._notice(this._modalError,'error') : ''}${body}</div>${feedback ? `<div class="dialog-feedback">${feedback}</div>` : ''}${footer ? `<footer class="dialog-foot">${footer}</footer>` : ''}</div></dialog>`;
   }
   _renderModal() {
     if (!this._modal) return;
@@ -626,10 +628,11 @@ class SetupCodeManagerPanel extends HTMLElement {
     const more = this.shadowRoot.querySelector('details.more');
     if (more) this._moreOpen = more.open;
     const t = this._t; const kind = this._modal.kind;
-    const codeProtocol = kind === 'editor' ? this._captureQueue?.protocol || (this._codeEditorFromDetails ? this._activeProtocol : '') : '';
-    const editorScroll = codeProtocol && snapshot && previousDialog?.contains(this.shadowRoot.activeElement)
-      && previousDialog.querySelector('[data-focus="code-editor-entry"]')
-      ? previousDialog.querySelector('.dialog-body').scrollTop : undefined;
+    const codeProtocol = kind === 'editor' ? this._captureQueue?.protocol || (this._codeEditorFromDetails || this._focusScanResult ? this._activeProtocol : '') : '';
+    const previousEditor = kind === 'editor' && previousDialog?.querySelector('#record-form') ? previousDialog : null;
+    const editorScroll = previousEditor?.querySelector('.dialog-body')?.scrollTop;
+    const previousCodeEntry = previousEditor?.querySelector('[data-focus="code-editor-entry"]');
+    const editorFocus = previousEditor?.contains(this.shadowRoot.activeElement) ? snapshot : null;
     const cancel = this._button('close-modal',t('cancel'));
     let html = '';
     if (kind === 'start') html = this._modalFrame(t('addTitle'), `<p>${esc(t(this._canLiveScan() ? 'addIntro' : 'photoHint'))}</p><div class="choice-list">${[['start-scan',this._canLiveScan() ? 'scan' : 'takePhoto','camera'],['start-photo','photo','image'],['start-manual','manual','keyboard']].map(([action,label,image]) => `<button type="button" class="choice" data-action="${action}">${icon(image)}<span class="grow">${esc(t(label))}</span>${icon('chevron')}</button>`).join('')}</div><p class="small muted" style="margin-top:22px">${esc(t('noPairing'))}</p>`);
@@ -652,12 +655,11 @@ class SetupCodeManagerPanel extends HTMLElement {
     this.shadowRoot.getElementById('modal-root').innerHTML = html;
     const dialog = this.shadowRoot.querySelector('dialog');
     if (!dialog) return;
-    let codeEntryTarget, editorAlert;
+    let codeEntryTarget;
     if (codeProtocol) {
       const index = this._draft.codes.findIndex(code => code.protocol === codeProtocol);
       const card = dialog.querySelector(`[data-field="code-value"][data-index="${index}"]`)?.closest('.editor-code');
-      editorAlert = dialog.querySelector('[role="alert"]');
-      codeEntryTarget = editorAlert || card || dialog.querySelector('.editor-section h3');
+      codeEntryTarget = card || dialog.querySelector('.editor-section h3');
       if (codeEntryTarget) {
         // Set the native dialog's initial focus before showModal runs its focus steps.
         codeEntryTarget.setAttribute('tabindex','-1');
@@ -672,14 +674,14 @@ class SetupCodeManagerPanel extends HTMLElement {
     dialog.addEventListener('cancel',event => { event.preventDefault(); this._closeModal(); });
     dialog.showModal();
     if (this._busy) dialog.querySelectorAll('input,select,textarea,button').forEach(control => { control.disabled = this._busyBlocks(control.dataset.action); });
-    if (codeProtocol) {
-      if (editorScroll !== undefined && !editorAlert) {
-        dialog.querySelector('.dialog-body').scrollTop = editorScroll;
-        this._restoreFocus(snapshot);
-      } else if (codeEntryTarget) {
-        if (this.shadowRoot.activeElement !== codeEntryTarget) codeEntryTarget.focus({preventScroll:true});
-        codeEntryTarget.scrollIntoView({block:'start',behavior:'instant'});
-      }
+    const changedCodeEntry = previousCodeEntry && codeEntryTarget
+      && previousCodeEntry.getAttribute('aria-label') !== codeEntryTarget.getAttribute('aria-label');
+    if (editorScroll !== undefined && !changedCodeEntry) {
+      if (editorFocus && !this._busy) this._restoreFocus(editorFocus);
+      dialog.querySelector('.dialog-body').scrollTop = editorScroll;
+    } else if (codeEntryTarget) {
+      if (this.shadowRoot.activeElement !== codeEntryTarget) codeEntryTarget.focus({preventScroll:true});
+      codeEntryTarget.scrollIntoView({block:'start',behavior:'instant'});
     } else if (snapshot && snapshot.key !== 'search') this._restoreFocus(snapshot);
     else if (kind === 'editor') this.shadowRoot.querySelector(this._identityManaged() ? '[data-field="notes"]' : '[data-field="name"]')?.focus({preventScroll:true});
     else if (kind === 'picker') this.shadowRoot.querySelector('[data-field="picker-search"]')?.focus({preventScroll:true});
@@ -691,12 +693,22 @@ class SetupCodeManagerPanel extends HTMLElement {
   _field(key,type='text',placeholder='') {
     return `<label class="field"><span>${esc(this._t(key === 'notes' ? 'note' : key === 'serial_number' ? 'serial' : key))}${key === 'name' ? ' *' : ''}</span>${type === 'textarea' ? `<textarea data-field="${key}" data-focus="${key}" maxlength="10000">${esc(this._draft[key])}</textarea>` : `<input type="${type}" data-field="${key}" data-focus="${key}" value="${esc(this._draft[key])}" ${key === 'name' ? 'required' : ''} maxlength="256" placeholder="${esc(placeholder)}" autocomplete="off">`}</label>`;
   }
+  _renderEditorFeedback() {
+    const t = this._t;
+    if (this._readingPhoto) return `<div class="notice" role="status"><span class="spinner" aria-hidden="true"></span>${esc(t('readingPhoto'))}</div>`;
+    if (this._draftError) {
+      const errorExtra = this._draftErrorCode === 'conflict' ? `<div>${this._button('compare-revision',t('compareCurrent'),'refresh','text')}</div>` : this._draftErrorCode === 'device_removed' ? `<div>${this._button('unlink-save',t('withoutLinkSave'),'unlink','text')}${this._button('picker',t('pickerTitle'),'link','text')}</div>` : this._draftErrorCode === 'duplicate_link' || this._draftErrorCode === 'archived_target' ? `<div>${this._button('picker',t('pickerTitle'),'link','text')}</div>` : '';
+      return this._notice(this._draftError,'error',errorExtra);
+    }
+    if (this._modalError) return this._notice(this._modalError,'error');
+    if (this._detected) return this._notice(t('codeDetected',{protocol:protocolNames[this._detected]}),'success');
+    return '';
+  }
   _renderEditor() {
     this._applyDraftIdentity();
     const t = this._t; const draft = this._draft;
-    const errorExtra = this._draftErrorCode === 'conflict' ? `<div>${this._button('compare-revision',t('compareCurrent'),'refresh','text')}</div>` : this._draftErrorCode === 'device_removed' ? `<div>${this._button('unlink-save',t('withoutLinkSave'),'unlink','text')}${this._button('picker',t('pickerTitle'),'link','text')}</div>` : this._draftErrorCode === 'duplicate_link' || this._draftErrorCode === 'archived_target' ? `<div>${this._button('picker',t('pickerTitle'),'link','text')}</div>` : '';
-    const body = `${this._captureQueue ? `<div class="capture-progress" role="status">${esc(t('captureProgress',{current:this._captureQueue.index+1,total:this._captureQueue.ids.length,protocol:protocolNames[this._captureQueue.protocol]}))}</div>` : ''}${this._readingPhoto ? `<div class="notice" role="status"><span class="spinner" aria-hidden="true"></span>${esc(t('readingPhoto'))}</div>` : ''}<form id="record-form">${this._detected ? this._notice(t('codeDetected',{protocol:protocolNames[this._detected]}),'success') : ''}${draft.archived ? this._notice(t('archivedTarget')) : ''}${this._draftError ? this._notice(this._draftError,'error',errorExtra) : ''}${this._renderIdentity()}${this._field('notes','textarea')}<details class="more" ${this._moreOpen ? 'open' : ''}><summary>${esc(t('moreDetails'))}</summary><div><div class="field-row">${this._field('manufacturer')}${this._field('model')}</div>${this._field('serial_number')}</div></details><section class="editor-section"><h3>${esc(t('setupCodes'))}</h3>${draft.codes.map((code,index) => `<div class="editor-code"><div class="code-title"><select data-field="code-protocol" data-index="${index}" aria-label="${esc(t('protocol'))}" ${this._captureQueue ? 'disabled' : ''}>${PROTOCOLS.map(p => `<option value="${p}" ${code.protocol === p ? 'selected' : ''} ${draft.codes.some((other,i) => i !== index && other.protocol === p) ? 'disabled' : ''}>${protocolNames[p]}</option>`).join('')}</select>${this._iconButton('remove-code',t('removeCode'),'trash',`data-index="${index}"`)}</div><label class="field"><span>${esc(t('codeValue'))}</span><div class="input-secret"><input type="${this._formRevealed.has(code.id) ? 'text' : 'password'}" data-field="code-value" data-focus="code-${index}" data-index="${index}" value="${esc(code.value)}" autocomplete="off" spellcheck="false" maxlength="4096">${this._iconButton('form-reveal',t(this._formRevealed.has(code.id) ? 'hide' : 'reveal'),'eye',`data-index="${index}"`)}</div></label><div class="code-tools">${this._button('code-scan',t(this._canLiveScan() ? (code.value ? 'rescan' : 'scan') : 'takePhoto'),'camera','text',`data-protocol="${code.protocol}"`)}${this._button('code-photo',t('photo'),'image','text',`data-protocol="${code.protocol}"`)}</div><label class="field"><span>${esc(t('codeLabel'))}</span><input type="text" data-field="code-label" data-focus="label-${index}" data-index="${index}" value="${esc(code.label)}" placeholder="${esc(t('codeLabelPlaceholder'))}" maxlength="256"></label></div>`).join('')}${draft.codes.length < PROTOCOLS.length ? this._button('add-slot',t('addCode'),'plus','text') : ''}</section><section class="editor-section"><h3>Home Assistant</h3><div class="link-box">${draft.links?.length ? draft.links.map((link,index) => `<div class="link-item">${icon('link')}<span>${esc(link.name || this._haDevices.find(d => d.id === link.ha_device_id)?.name || this._devices.find(r => r.links?.some(l => l.ha_device_id === link.ha_device_id))?.name || link.ha_device_id)}${link.active === false ? `<small class="muted" style="display:block">${esc(t('unlinked'))}</small>` : ''}</span>${this._iconButton('remove-link',t('removeLink'),'close',`data-index="${index}"`)}</div>`).join('') : `<p class="muted">${esc(t('noLink'))}</p>`}${this._captureQueue ? '' : this._button('picker',t(draft.links?.length ? 'changeLinks' : 'linkDevice'),'link','text')}<p class="muted">${esc(t('linkLater'))}</p></div></section></form>`;
-    return this._modalFrame(t(draft.id ? 'editTitle' : 'addTitle'),body,this._button('close-modal',t(this._captureQueue ? 'endCapture' : 'cancel'))+(this._captureQueue ? this._button('capture-skip',t('skipCapture')) : '')+`<button type="submit" form="record-form" class="button primary" ${this._busy ? 'disabled' : ''}>${this._busy && !this._readingPhoto ? '<span class="spinner"></span>' : ''}${esc(t(this._busy && !this._readingPhoto ? 'saving' : this._captureQueue ? 'saveNext' : 'save'))}</button>`);
+    const body = `${this._captureQueue ? `<div class="capture-progress" role="status">${esc(t('captureProgress',{current:this._captureQueue.index+1,total:this._captureQueue.ids.length,protocol:protocolNames[this._captureQueue.protocol]}))}</div>` : ''}<form id="record-form">${draft.archived ? this._notice(t('archivedTarget')) : ''}${this._renderIdentity()}${this._field('notes','textarea')}<details class="more" ${this._moreOpen ? 'open' : ''}><summary>${esc(t('moreDetails'))}</summary><div><div class="field-row">${this._field('manufacturer')}${this._field('model')}</div>${this._field('serial_number')}</div></details><section class="editor-section"><h3>${esc(t('setupCodes'))}</h3>${draft.codes.map((code,index) => `<div class="editor-code"><div class="code-title"><select data-field="code-protocol" data-index="${index}" aria-label="${esc(t('protocol'))}" ${this._captureQueue ? 'disabled' : ''}>${PROTOCOLS.map(p => `<option value="${p}" ${code.protocol === p ? 'selected' : ''} ${draft.codes.some((other,i) => i !== index && other.protocol === p) ? 'disabled' : ''}>${protocolNames[p]}</option>`).join('')}</select>${this._iconButton('remove-code',t('removeCode'),'trash',`data-index="${index}"`)}</div><label class="field"><span>${esc(t('codeValue'))}</span><div class="input-secret"><input type="${this._formRevealed.has(code.id) ? 'text' : 'password'}" data-field="code-value" data-focus="code-${index}" data-index="${index}" value="${esc(code.value)}" autocomplete="off" spellcheck="false" maxlength="4096">${this._iconButton('form-reveal',t(this._formRevealed.has(code.id) ? 'hide' : 'reveal'),'eye',`data-index="${index}"`)}</div></label><div class="code-tools">${this._button('code-scan',t(this._canLiveScan() ? (code.value ? 'rescan' : 'scan') : 'takePhoto'),'camera','text',`data-protocol="${code.protocol}"`)}${this._button('code-photo',t('photo'),'image','text',`data-protocol="${code.protocol}"`)}</div><label class="field"><span>${esc(t('codeLabel'))}</span><input type="text" data-field="code-label" data-focus="label-${index}" data-index="${index}" value="${esc(code.label)}" placeholder="${esc(t('codeLabelPlaceholder'))}" maxlength="256"></label></div>`).join('')}${draft.codes.length < PROTOCOLS.length ? this._button('add-slot',t('addCode'),'plus','text') : ''}</section><section class="editor-section"><h3>Home Assistant</h3><div class="link-box">${draft.links?.length ? draft.links.map((link,index) => `<div class="link-item">${icon('link')}<span>${esc(link.name || this._haDevices.find(d => d.id === link.ha_device_id)?.name || this._devices.find(r => r.links?.some(l => l.ha_device_id === link.ha_device_id))?.name || link.ha_device_id)}${link.active === false ? `<small class="muted" style="display:block">${esc(t('unlinked'))}</small>` : ''}</span>${this._iconButton('remove-link',t('removeLink'),'close',`data-index="${index}"`)}</div>`).join('') : `<p class="muted">${esc(t('noLink'))}</p>`}${this._captureQueue ? '' : this._button('picker',t(draft.links?.length ? 'changeLinks' : 'linkDevice'),'link','text')}<p class="muted">${esc(t('linkLater'))}</p></div></section></form>`;
+    return this._modalFrame(t(draft.id ? 'editTitle' : 'addTitle'),body,this._button('close-modal',t(this._captureQueue ? 'endCapture' : 'cancel'))+(this._captureQueue ? this._button('capture-skip',t('skipCapture')) : '')+`<button type="submit" form="record-form" class="button primary" ${this._busy ? 'disabled' : ''}>${this._busy && !this._readingPhoto ? '<span class="spinner"></span>' : ''}${esc(t(this._busy && !this._readingPhoto ? 'saving' : this._captureQueue ? 'saveNext' : 'save'))}</button>`,false,this._renderEditorFeedback());
   }
   _pickerRecords(device) { return this._devices.filter(record => (device.record_ids || []).includes(record.id) || record.links?.some(link => link.ha_device_id === device.id)); }
   _pickerMissing(device) { return !this._pickerRecords(device).some(record => hasCode(record,this._activeProtocol)); }
@@ -816,12 +828,25 @@ class SetupCodeManagerPanel extends HTMLElement {
   }
   _receiveScan(value) {
     this._stopCamera();
+    this._resetScanFeedback();
     const protocol = protocolFrom(value);
     if (!protocol) { this._draftError = this._t('unsupportedQR'); this._openModal('editor'); return; }
     if (this._captureQueue && protocol !== this._captureQueue.protocol) { this._draftError = this._t('captureWrongProtocol',{expected:protocolNames[this._captureQueue.protocol],actual:protocolNames[protocol]}); this._openModal('editor'); return; }
     this._activeProtocol = protocol; this._detected = protocol; this._dirty = true;
     this._pendingCodes = [{id:uid(),protocol,value,label:''}];
     this._applyPendingCodes();
+  }
+  _resetScanFeedback() {
+    this._focusScanResult = true;
+    this._detected = null;
+    this._draftError = '';
+    this._draftErrorCode = '';
+  }
+  _clearScanConfirmation(protocol) {
+    if (this._detected !== protocol) return;
+    this._detected = null;
+    // Keep the text input and its caret when a scanned value is edited.
+    this.shadowRoot.querySelector('.dialog-feedback .notice.success')?.parentElement?.remove();
   }
   _chooseFile(accept,onFile,{capture = false} = {}) {
     const input = document.createElement('input'); input.type = 'file'; input.accept = accept;
@@ -838,7 +863,8 @@ class SetupCodeManagerPanel extends HTMLElement {
       if (generation !== this._dialogGeneration || !this._draft) return;
       this._photoController?.abort();
       const controller = new AbortController(); this._photoController = controller;
-      this._stopCamera(); this._busy = true; this._readingPhoto = true; this._draftError = '';
+      this._stopCamera(); this._busy = true; this._readingPhoto = true;
+      this._resetScanFeedback();
       if (this._modal?.kind !== 'editor') this._openModal('editor');
       else this._renderModal();
       try {
@@ -856,6 +882,7 @@ class SetupCodeManagerPanel extends HTMLElement {
     this._applyDraftIdentity();
     const form = this.shadowRoot.getElementById('record-form');
     if (form && !form.reportValidity()) return;
+    this._draftError = ''; this._draftErrorCode = ''; this._modalError = ''; this._detected = null;
     const record = Object.fromEntries(['id','name','manufacturer','model','serial_number','location','notes','archived','codes','links','created_at','updated_at','source_refs'].filter(key => this._draft[key] !== undefined).map(key => [key,clone(this._draft[key])]));
     record.links = (record.links || []).map(link => ({ha_device_id:link.ha_device_id,...(typeof link.active === 'boolean' ? {active:link.active} : {})}));
     record.name = record.name.trim();
@@ -1040,7 +1067,11 @@ class SetupCodeManagerPanel extends HTMLElement {
     else if (this._draft && ['name','location','manufacturer','model','serial_number','notes'].includes(field)) { this._draft[field] = el.value; this._dirty = true; }
     else if (this._draft && ['code-value','code-label'].includes(field)) {
       const code = this._draft.codes[Number(el.dataset.index)];
-      if (code) { code[field === 'code-value' ? 'value' : 'label'] = el.value; this._dirty = true; this._activeProtocol = code.protocol; }
+      if (code) {
+        if (field === 'code-value' && code.value !== el.value) this._clearScanConfirmation(code.protocol);
+        code[field === 'code-value' ? 'value' : 'label'] = el.value;
+        this._dirty = true; this._activeProtocol = code.protocol;
+      }
     }
   }
   _onChange(event) {
@@ -1052,7 +1083,11 @@ class SetupCodeManagerPanel extends HTMLElement {
     else if (field === 'export-scope') { this._exportScope = el.value; this._renderModal(); }
     else if (field === 'pdf-notes') this._pdfNotes = el.checked;
     else if (field === 'capture-protocol') { this._captureProtocol = el.value; this._renderModal(); }
-    else if (field === 'code-protocol' && this._draft) { this._draft.codes[Number(el.dataset.index)].protocol = el.value; this._activeProtocol = el.value; this._dirty = true; this._renderModal(); }
+    else if (field === 'code-protocol' && this._draft) {
+      const code = this._draft.codes[Number(el.dataset.index)];
+      if (code.protocol !== el.value) this._clearScanConfirmation(code.protocol);
+      code.protocol = el.value; this._activeProtocol = el.value; this._dirty = true; this._renderModal();
+    }
     else if (field === 'export-format') this._exportFormat = el.value;
     else if (field === 'import-choice') { this._decisions[el.dataset.key] = el.checked ? 'add' : 'skip'; this._renderModal(); }
     else if (field === 'resolve-import') { this._decisions[el.dataset.key] = el.value; this._renderModal(); }
@@ -1108,10 +1143,14 @@ class SetupCodeManagerPanel extends HTMLElement {
       else if (action === 'code-photo') this._choosePhoto(button.dataset.protocol);
       else if (action === 'scan-capture') this._choosePhoto(undefined,true);
       else if (action === 'scan-photo') this._choosePhoto();
-      else if (action === 'scan-manual') { this._addSlot(this._activeProtocol); this._openModal('editor'); }
+      else if (action === 'scan-manual') { this._focusScanResult = true; this._addSlot(this._activeProtocol); this._openModal('editor'); }
       else if (action === 'back-editor') this._openModal('editor');
       else if (action === 'add-slot') { this._addSlot(); this._renderModal(); }
-      else if (action === 'remove-code') { this._draft.codes.splice(Number(button.dataset.index),1); this._dirty = true; this._renderModal(); }
+      else if (action === 'remove-code') {
+        const [removed] = this._draft.codes.splice(Number(button.dataset.index),1);
+        if (removed) this._clearScanConfirmation(removed.protocol);
+        this._dirty = true; this._renderModal();
+      }
       else if (action === 'remove-link') { this._draft.links.splice(Number(button.dataset.index),1); this._applyDraftIdentity(); this._dirty = true; this._renderModal(); }
       else if (action === 'form-reveal') { const key = this._draft.codes[Number(button.dataset.index)].id; this._formRevealed.has(key) ? this._formRevealed.delete(key) : this._formRevealed.add(key); this._renderModal(); }
       else if (action === 'reveal' && code) { this._revealed.has(code.id) ? this._revealed.delete(code.id) : this._revealed.add(code.id); this._renderMain(); }
@@ -1128,7 +1167,7 @@ class SetupCodeManagerPanel extends HTMLElement {
       else if (action === 'use-record') this._useHADevice(this._pendingDevice,this._devices.find(item => item.id === id));
       else if (action === 'back-picker') this._openModal('picker');
       else if (action === 'without-link') { this._draft.links = []; this._dirty = true; this._openModal('editor'); }
-      else if (action === 'keep-code') this._applyPendingCodes();
+      else if (action === 'keep-code') { this._detected = null; this._applyPendingCodes(); }
       else if (action === 'replace-code') { Object.assign(this._modal.current,{value:this._modal.incoming.value,label:this._modal.incoming.label || this._modal.current.label}); this._dirty = true; this._applyPendingCodes(); }
       else if (action === 'compare-reveal') { const key = button.dataset.key; this._compareRevealed.has(key) ? this._compareRevealed.delete(key) : this._compareRevealed.add(key); this._renderModal(); }
       else if (action === 'save-anyway') await this._save(true);

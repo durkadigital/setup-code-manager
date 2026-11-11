@@ -50,3 +50,14 @@
     text-align: end;
   }
 }
+.dialog-feedback {
+  flex-shrink: 0;
+  max-height: 32dvh;
+  overflow: auto;
+  padding: 0 24px 10px;
+  background: var(--sc-surface);
+}
+.dialog-feedback .notice { margin: 0; border-radius: 12px; }
+@media (max-width: 800px) {
+  .dialog-feedback { padding-inline: 20px; }
+}

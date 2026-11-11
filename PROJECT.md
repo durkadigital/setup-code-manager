@@ -14,7 +14,7 @@ praktische Grenzen stehen in der [README](README.md).
 | Integrationsordner | `custom_components/setup_code_manager` |
 | Speicherdatei | `.storage/setup_code_manager` im HA-Konfigurationsordner |
 | Kontoeinstellungen | `.storage/setup_code_manager_preferences` im HA-Konfigurationsordner |
-| Aktuelle Vorabversion | `0.1.0b12` |
+| Aktuelle Vorabversion | `0.1.0b13` |
 | Mindestversion | Home Assistant `2026.11.0` |
 
 Grundlage ist [PhantomPhoton/Setup-Codes](https://github.com/PhantomPhoton/Setup-Codes),
@@ -24,6 +24,10 @@ eigene API-, Panel- und Speicherkennungen. Details zu Herkunft und Drittanbieter
 Lizenzen stehen in [PROVENANCE.md](docs/PROVENANCE.md).
 
 ## Stand und Verteilung
+
+**0.1.0b13** zeigt Scanfortschritt, Erkennungsbestätigung und Fehler im
+Editor direkt über den Schaltflächen. Der Codebereich bleibt beim Foto-Scan
+sichtbar. Die Bestätigung für das Speichern folgt nach der Speicherung.
 
 **0.1.0b12** öffnet beim Hinzufügen eines Codes direkt die Codekarte. In der
 Geräteübersicht stehen „Code gespeichert“ und „Code fehlt“ rechts in der
