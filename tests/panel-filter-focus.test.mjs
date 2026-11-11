@@ -65,6 +65,9 @@ class Node {
   getClientRects() { return this.hidden ? [] : [{}]; }
   getBoundingClientRect() { return {left:20,right:490,top:200,bottom:244,width:470,height:this.id === 'filter-panel' ? 380 : 44}; }
   focus() { this.state.activeElement = this; this.state.focusCalls.push(this); if (this.localName === 'select') this.state.selectFocuses++; }
+  scrollIntoView() { this.state.scrolledTo = this; }
+  showModal() { this.open = true; (this.querySelector('[autofocus]') || this.querySelector('button,input,textarea,select'))?.focus(); }
+  close() { this.open = false; }
   showPopover() { if (!this.popoverOpen) { this.popoverOpen = true; this.state.popoverOpens++; } }
   hidePopover() { if (this.popoverOpen) { this.popoverOpen = false; this.state.popoverCloses++; } }
   get outerHTML() { const attrs = [...this.attributes].map(([name,value]) => ` ${name}="${encode(value)}"`).join(''); return `<${this.localName}${attrs}>${voidTags.has(this.localName) ? '' : `${this.innerHTML}</${this.localName}>`}`; }
@@ -285,4 +288,61 @@ test('HA language changes translate retained filter and tab labels without reope
   assert.equal(state.selectFocuses,0);
   assert.equal(state.popoverCloses,0);
   assert.equal(state.popoverOpens,1);
+});
+
+test('adding a code from details opens the new code card without focusing an input and returns to its button', async () => {
+  const {panel,state} = fixture();
+  panel._devices[0].codes = [{id:'existing',protocol:'homekit',value:'03145154',label:'Synthetic'}];
+  panel._selectedId = 'a';
+  panel._renderMain();
+  const trigger = panel.shadowRoot.querySelector('[data-action="edit-codes"]');
+  window.confirm = () => true;
+  trigger.focus();
+  await panel._onClick({target:trigger});
+  const card = panel.shadowRoot.querySelector('[data-field="code-value"][data-index="1"]').closest('.editor-code');
+  assert.equal(panel.shadowRoot.activeElement === card,true,'Focus belongs to the new code card.');
+  assert.equal(card.getAttribute('tabindex'),'-1');
+  assert.equal(card.getAttribute('aria-label'),'Matter');
+  assert.equal(state.scrolledTo === card,true,'Scroll the new card into view.');
+  assert.equal(state.focusCalls.some(node => ['input','textarea','select'].includes(node.localName)),false);
+
+  await panel._onClick({target:panel.shadowRoot.querySelector('dialog [data-action="close-modal"]')});
+  assert.equal(panel.shadowRoot.activeElement === trigger,true);
+  panel._renderMain();
+  assert.equal(panel.shadowRoot.activeElement === panel.shadowRoot.querySelector('[data-action="edit-codes"]'),true,'Keep the return focus when the details rerender.');
+});
+
+test('guided capture focuses each target card without opening the keyboard', async () => {
+  const {panel,state} = fixture({desktop:true});
+  panel._devices[0].codes = [{id:'existing',protocol:'homekit',value:'03145154',label:'Synthetic'}];
+  await panel._onClick({target:panel.shadowRoot.querySelector('[data-action="capture-start"]')});
+  await panel._onClick({target:panel.shadowRoot.querySelector('[data-action="capture-begin"]')});
+  for (const [id,index] of [['a',1],['b',0]]) {
+    assert.equal(panel._draft.id,id);
+    const card = panel.shadowRoot.querySelector(`[data-field="code-value"][data-index="${index}"]`).closest('.editor-code');
+    assert.equal(panel.shadowRoot.activeElement === card,true);
+    assert.equal(state.scrolledTo === card,true);
+    if (id === 'a') await panel._onClick({target:panel.shadowRoot.querySelector('[data-action="capture-skip"]')});
+  }
+  assert.equal(state.focusCalls.some(node => ['input','textarea','select'].includes(node.localName)),false);
+});
+
+test('ordinary edit keeps its initial focus on the linked device note', async () => {
+  const {panel} = fixture();
+  panel._selectedId = 'a';
+  panel._renderMain();
+  await panel._onClick({target:panel.shadowRoot.querySelector('[data-action="edit"]')});
+  assert.equal(panel.shadowRoot.activeElement?.dataset.field,'notes');
+});
+
+test('rerendering the code editor preserves a code field the user focused and its scroll position', async () => {
+  const {panel} = fixture();
+  panel._selectedId = 'a';
+  panel._renderMain();
+  await panel._onClick({target:panel.shadowRoot.querySelector('[data-action="edit-codes"]')});
+  control(panel,'code-value').focus();
+  panel.shadowRoot.querySelector('.dialog-body').scrollTop = 230;
+  panel._renderModal();
+  assert.equal(panel.shadowRoot.activeElement === control(panel,'code-value'),true);
+  assert.equal(panel.shadowRoot.querySelector('.dialog-body').scrollTop,230);
 });

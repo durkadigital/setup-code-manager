@@ -4,7 +4,7 @@ Setup Code Manager ist eine **benutzerdefinierte Integration** für Home Assista
 Sie liegt im Ordner `custom_components/setup_code_manager` und wird unter
 **Geräte & Dienste** eingerichtet.
 
-Die aktuelle Version **0.1.0b8 ist eine Vorabversion**. Das Repository ist noch
+Die aktuelle Version **0.1.0b12 ist eine Vorabversion**. Das Repository ist noch
 nicht im allgemeinen Marketplace-Katalog gelistet und wird daher über seinen
 Link hinzugefügt. Lege vor einer Testinstallation oder einem Update eine aktuelle
 HA-Sicherung einschließlich Konfigurationsordner an.

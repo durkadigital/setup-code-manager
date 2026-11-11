@@ -430,7 +430,26 @@ class SetupCodeManagerPanel extends HTMLElement {
   _renderListRow(record,selected) {
     const t = this._t;
     const action = this._selecting ? 'toggle-record' : 'select';
-    return `<tr data-action="${action}" data-id="${esc(record.id)}" class="${selected?.id === record.id ? 'selected' : ''}"><td><div class="device-name">${this._selecting ? `<label class="record-check" data-action="ignore-selection"><input type="checkbox" data-field="record-selection" data-focus="record-selection-${esc(record.id)}" data-id="${esc(record.id)}" aria-label="${esc(t('selectDevice',{name:record.name}))}" ${this._selection.has(record.id) ? 'checked' : ''}></label>` : icon(deviceIcon(record))}<div><button type="button" class="row-open" data-focus="record-row-${esc(record.id)}" data-action="${action}" data-id="${esc(record.id)}">${esc(record.name)}</button><div class="mobile-meta">${esc([record.location,displayProtocols(record).map(p => protocolNames[p]).join(', ')].filter(Boolean).join(' · '))}</div><div class="mobile-codes">${this._codeStatus(record)}${this._status(record)}</div></div></div></td><td class="location-column">${esc(record.location || '—')}</td><td><div class="code-summary">${esc(displayProtocols(record).map(p => protocolNames[p]).join(', ') || '—')}<div>${this._codeStatus(record)}</div></div></td><td>${this._status(record)}</td></tr>`;
+    const id = esc(record.id);
+    const protocols = displayProtocols(record).map(protocol => protocolNames[protocol]).join(', ');
+    const codeStatus = this._codeStatus(record, { showMissingIcon: true });
+    const haStatus = this._status(record);
+    return `<tr data-action="${action}" data-id="${id}" class="${selected?.id === record.id ? 'selected' : ''}">
+      <td><div class="device-name">
+        ${this._selecting ? `<label class="record-check" data-action="ignore-selection"><input type="checkbox" data-field="record-selection" data-focus="record-selection-${id}" data-id="${id}" aria-label="${esc(t('selectDevice',{name:record.name}))}" ${this._selection.has(record.id) ? 'checked' : ''}></label>` : icon(deviceIcon(record))}
+        <div><button type="button" class="row-open" data-focus="record-row-${id}" data-action="${action}" data-id="${id}">${esc(record.name)}</button>
+          <div class="mobile-device-meta">
+            <div><div class="mobile-meta">${esc([record.location,protocols].filter(Boolean).join(' · '))}</div>
+              <div class="mobile-ha-status">${haStatus}</div>
+            </div>
+            <span class="mobile-code-status">${codeStatus}</span>
+          </div>
+        </div>
+      </div></td>
+      <td class="location-column">${esc(record.location || '—')}</td>
+      <td>${codeStatus}${protocols ? `<div class="code-protocols">${esc(protocols)}</div>` : ''}</td>
+      <td>${haStatus}</td>
+    </tr>`;
   }
   _renderDeviceTable(rows,selected) {
     const t = this._t;
@@ -443,9 +462,10 @@ class SetupCodeManagerPanel extends HTMLElement {
     const t = this._t, selected = this._selectionRecords();
     return `<div class="selection-bar"><strong>${esc(t('selectedCount',{count:selected.length}))}</strong>${this._button('select-results',t(rows.length && rows.every(record => this._selection.has(record.id)) ? 'deselectAll' : 'selectResults'),'','text')}${this._button('export-selected',t('export'),'upload','',selected.length ? '' : 'disabled')}${this._button('pdf-selected',t('pdfCards'),'pdf','',selected.length && selected.length <= MAX_PDF_RECORDS ? '' : 'disabled')}</div>`;
   }
-  _codeStatus(record) {
+  _codeStatus(record, { showMissingIcon = false } = {}) {
     const stored = hasCode(record);
-    return `<span class="code-status ${stored ? 'stored' : 'missing'}">${stored ? icon('check') : ''}${esc(this._t(stored ? 'codeStored' : 'noCode'))}</span>`;
+    const symbol = stored || showMissingIcon ? icon(stored ? 'check' : 'warning') : '';
+    return `<span class="code-status ${stored ? 'stored' : 'missing'}">${symbol}${esc(this._t(stored ? 'codeStored' : 'noCode'))}</span>`;
   }
   _identityManaged(record = this._draft) { return !!record?.links?.some(link => link.active !== false); }
   _applyDraftIdentity() {
@@ -531,7 +551,7 @@ class SetupCodeManagerPanel extends HTMLElement {
   _renderDetails(record) {
     const t = this._t;
     const links = record.links || [];
-    return `<aside id="inventory-details" class="details" aria-label="${esc(record.name)}"><div class="detail-heading"><div><h2 title="${esc(record.name)}">${esc(record.name)}</h2></div>${this._iconButton('close-details',t('close'),'close')}</div><div class="detail-body"><div class="detail-meta">${this._codeStatus(record)}<p>${esc([record.location,record.model].filter(Boolean).join(' · ') || record.manufacturer || '')}</p>${record.archived ? `<span class="badge">${icon('archive')}${esc(t('archived'))}</span>` : ''}</div><div class="detail-actions">${this._button('edit',t('edit'),'','text',`data-id="${esc(record.id)}"`)}${this._button('pdf-record',t('pdfCard'),'pdf','text',`data-id="${esc(record.id)}"`)}</div><section class="detail-section"><h3>Home Assistant</h3><div class="detail-status">${this._status(record)}</div>${links.some(link => link.active === false) ? `<p class="muted small" style="margin-top:12px">${esc(t('removedHint'))}</p>` : ''}${links.filter(link => link.active !== false).map(link => `<div class="link-item"><span class="small muted">${esc(link.name || record.name)}</span><a class="button" href="/config/devices/device/${encodeURIComponent(link.ha_device_id)}">${icon('external')}${esc(t('openDevice'))}</a></div>`).join('')}${this._button('edit-links',t(links.length ? 'changeLinks' : 'linkDevice'),'link','text',`data-id="${esc(record.id)}"`)}</section><section class="detail-section"><h3>${esc(t('setupCodes'))}</h3>${recordCodes(record).length ? recordCodes(record).map(code => this._renderCode(code)).join('') : `<p class="muted">${esc(t('noCode'))}</p>`}${this._button('edit-codes',t('addCode'),'plus','text',`data-id="${esc(record.id)}"`)}</section><section class="detail-section"><h3>${esc(t('note'))}</h3><p class="muted">${esc(record.notes || t('noNote'))}</p>${record.manufacturer || record.serial_number ? `<p class="small muted" style="margin-top:16px">${esc([record.manufacturer, record.serial_number].filter(Boolean).join(' · '))}</p>` : ''}</section><section class="detail-section detail-bottom">${this._button('archive',t(record.archived ? 'restore' : 'archiveAction'),record.archived ? 'restore' : 'archive','text',`data-id="${esc(record.id)}"`)}${this._button('delete',t('delete'),'trash','text danger',`data-id="${esc(record.id)}"`)}</section></div></aside>`;
+    return `<aside id="inventory-details" class="details" aria-label="${esc(record.name)}"><div class="detail-heading"><div><h2 title="${esc(record.name)}">${esc(record.name)}</h2></div>${this._iconButton('close-details',t('close'),'close')}</div><div class="detail-body"><div class="detail-meta">${this._codeStatus(record)}<p>${esc([record.location,record.model].filter(Boolean).join(' · ') || record.manufacturer || '')}</p>${record.archived ? `<span class="badge">${icon('archive')}${esc(t('archived'))}</span>` : ''}</div><div class="detail-actions">${this._button('edit',t('edit'),'','text',`data-id="${esc(record.id)}"`)}${this._button('pdf-record',t('pdfCard'),'pdf','text',`data-id="${esc(record.id)}"`)}</div><section class="detail-section"><h3>Home Assistant</h3><div class="detail-status">${this._status(record)}</div>${links.some(link => link.active === false) ? `<p class="muted small" style="margin-top:12px">${esc(t('removedHint'))}</p>` : ''}${links.filter(link => link.active !== false).map(link => `<div class="link-item"><span class="small muted">${esc(link.name || record.name)}</span><a class="button" href="/config/devices/device/${encodeURIComponent(link.ha_device_id)}">${icon('external')}${esc(t('openDevice'))}</a></div>`).join('')}${this._button('edit-links',t(links.length ? 'changeLinks' : 'linkDevice'),'link','text',`data-id="${esc(record.id)}"`)}</section><section class="detail-section"><h3>${esc(t('setupCodes'))}</h3>${recordCodes(record).length ? recordCodes(record).map(code => this._renderCode(code)).join('') : `<p class="muted">${esc(t('noCode'))}</p>`}${this._button('edit-codes',t('addCode'),'plus','text',`data-id="${esc(record.id)}" data-focus="detail-code-editor-${esc(record.id)}"`)}</section><section class="detail-section"><h3>${esc(t('note'))}</h3><p class="muted">${esc(record.notes || t('noNote'))}</p>${record.manufacturer || record.serial_number ? `<p class="small muted" style="margin-top:16px">${esc([record.manufacturer, record.serial_number].filter(Boolean).join(' · '))}</p>` : ''}</section><section class="detail-section detail-bottom">${this._button('archive',t(record.archived ? 'restore' : 'archiveAction'),record.archived ? 'restore' : 'archive','text',`data-id="${esc(record.id)}"`)}${this._button('delete',t('delete'),'trash','text danger',`data-id="${esc(record.id)}"`)}</section></div></aside>`;
   }
   _manualValue(code) {
     return code?.protocol === 'matter' && code.value?.startsWith('MT:') && typeof code.manual_value === 'string' && /^(?:[0-9]{11}|[0-9]{21})$/.test(code.manual_value) ? code.manual_value : '';
@@ -567,8 +587,9 @@ class SetupCodeManagerPanel extends HTMLElement {
     } catch { this._toast(this._t(failureKey)); }
   }
   _canQR(code) { return /^(MT:|X-HM:\/\/)/.test(code.value || '') || code.protocol === 'zwave' && /^90\d{30,}$/.test(code.value || ''); }
-  _newDraft(record) {
+  _newDraft(record, fromCodeAction = false) {
     this._dialogGeneration++;
+    this._codeEditorFromDetails = fromCodeAction;
     this._draft = clone(record || blankRecord()); this._baseRecord = clone(this._draft);
     this._baseRevision = this._revision; this._dirty = false; this._detected = null; this._moreOpen = false; this._draftError = ''; this._draftErrorCode = '';
     this._formRevealed.clear(); this._compareRevealed.clear(); this._activeProtocol = this._protocol || 'matter';
@@ -584,13 +605,16 @@ class SetupCodeManagerPanel extends HTMLElement {
       this._photoController?.abort(); this._photoController = null; this._readingPhoto = false; this._busy = false;
     }
     if (!force && this._draft && this._dirty && ['editor','picker','choose-record','code-conflict','scanner','start','revision','duplicate'].includes(this._modal?.kind) && !window.confirm(this._t('discard'))) { this._renderModal(); return; }
+    const returnToCodeAction = this._codeEditorFromDetails && this._selectedId && this._selectedId === this._draft?.id;
     this._dialogGeneration++; this._stopCamera(); this._photoController?.abort(); this._photoController = null; this._readingPhoto = false; this.shadowRoot.querySelector('dialog')?.close();
     this.shadowRoot.getElementById('modal-root').innerHTML = ''; this._modal = null;
     this._draft = null; this._pendingCodes = null; this._preview = null; this._importSource = null; this._pdfRecords = null; this._pdfNotes = false; this._pdfPending = false;
+    this._codeEditorFromDetails = false;
     if (closingPDF) this._busy = false;
     if (!preserveCapture) this._captureQueue = null;
     this._formRevealed.clear(); this._compareRevealed.clear();
-    this.shadowRoot.querySelector(this._selectedId ? '[data-action="edit"]' : '[data-action="add"]')?.focus();
+    const returnAction = returnToCodeAction ? 'edit-codes' : this._selectedId ? 'edit' : 'add';
+    this.shadowRoot.querySelector(`[data-action="${returnAction}"]`)?.focus();
   }
   _modalFrame(title, body, footer = '', wide = false) {
     return `<dialog ${wide ? 'class="wide"' : ''} aria-labelledby="dialog-title"><div class="dialog-shell"><header class="dialog-head"><h2 id="dialog-title">${esc(title)}</h2>${this._iconButton('close-modal',this._t('close'),'close')}</header><div class="dialog-body">${this._modalError ? this._notice(this._modalError,'error') : ''}${body}</div>${footer ? `<footer class="dialog-foot">${footer}</footer>` : ''}</div></dialog>`;
@@ -598,9 +622,14 @@ class SetupCodeManagerPanel extends HTMLElement {
   _renderModal() {
     if (!this._modal) return;
     const snapshot = this._focusSnapshot();
+    const previousDialog = this.shadowRoot.querySelector('dialog');
     const more = this.shadowRoot.querySelector('details.more');
     if (more) this._moreOpen = more.open;
     const t = this._t; const kind = this._modal.kind;
+    const codeProtocol = kind === 'editor' ? this._captureQueue?.protocol || (this._codeEditorFromDetails ? this._activeProtocol : '') : '';
+    const editorScroll = codeProtocol && snapshot && previousDialog?.contains(this.shadowRoot.activeElement)
+      && previousDialog.querySelector('[data-focus="code-editor-entry"]')
+      ? previousDialog.querySelector('.dialog-body').scrollTop : undefined;
     const cancel = this._button('close-modal',t('cancel'));
     let html = '';
     if (kind === 'start') html = this._modalFrame(t('addTitle'), `<p>${esc(t(this._canLiveScan() ? 'addIntro' : 'photoHint'))}</p><div class="choice-list">${[['start-scan',this._canLiveScan() ? 'scan' : 'takePhoto','camera'],['start-photo','photo','image'],['start-manual','manual','keyboard']].map(([action,label,image]) => `<button type="button" class="choice" data-action="${action}">${icon(image)}<span class="grow">${esc(t(label))}</span>${icon('chevron')}</button>`).join('')}</div><p class="small muted" style="margin-top:22px">${esc(t('noPairing'))}</p>`);
@@ -619,15 +648,40 @@ class SetupCodeManagerPanel extends HTMLElement {
     else if (kind === 'import') html = this._modalFrame(t('importTitle'),`<p>${esc(t('importIntro'))}</p><div class="choice-list">${this._button('pick-import',t('chooseFile'),'download')}</div>`);
     else if (kind === 'preview') html = this._renderPreview();
     else if (kind === 'revision') html = this._renderRevision();
-    this.shadowRoot.querySelector('dialog')?.close();
+    previousDialog?.close();
     this.shadowRoot.getElementById('modal-root').innerHTML = html;
     const dialog = this.shadowRoot.querySelector('dialog');
     if (!dialog) return;
+    let codeEntryTarget, editorAlert;
+    if (codeProtocol) {
+      const index = this._draft.codes.findIndex(code => code.protocol === codeProtocol);
+      const card = dialog.querySelector(`[data-field="code-value"][data-index="${index}"]`)?.closest('.editor-code');
+      editorAlert = dialog.querySelector('[role="alert"]');
+      codeEntryTarget = editorAlert || card || dialog.querySelector('.editor-section h3');
+      if (codeEntryTarget) {
+        // Set the native dialog's initial focus before showModal runs its focus steps.
+        codeEntryTarget.setAttribute('tabindex','-1');
+        codeEntryTarget.setAttribute('autofocus','');
+        codeEntryTarget.setAttribute('data-focus','code-editor-entry');
+        if (codeEntryTarget === card) {
+          card.setAttribute('role','group');
+          card.setAttribute('aria-label',protocolNames[codeProtocol]);
+        }
+      }
+    }
     dialog.addEventListener('cancel',event => { event.preventDefault(); this._closeModal(); });
     dialog.showModal();
     if (this._busy) dialog.querySelectorAll('input,select,textarea,button').forEach(control => { control.disabled = this._busyBlocks(control.dataset.action); });
-    if (snapshot && snapshot.key !== 'search') this._restoreFocus(snapshot);
-    else if (kind === 'editor') this.shadowRoot.querySelector(this._captureQueue ? `[data-field="code-value"][data-index="${this._draft.codes.findIndex(code => code.protocol === this._captureQueue.protocol)}"]` : this._identityManaged() ? '[data-field="notes"]' : '[data-field="name"]')?.focus({preventScroll:true});
+    if (codeProtocol) {
+      if (editorScroll !== undefined && !editorAlert) {
+        dialog.querySelector('.dialog-body').scrollTop = editorScroll;
+        this._restoreFocus(snapshot);
+      } else if (codeEntryTarget) {
+        if (this.shadowRoot.activeElement !== codeEntryTarget) codeEntryTarget.focus({preventScroll:true});
+        codeEntryTarget.scrollIntoView({block:'start',behavior:'instant'});
+      }
+    } else if (snapshot && snapshot.key !== 'search') this._restoreFocus(snapshot);
+    else if (kind === 'editor') this.shadowRoot.querySelector(this._identityManaged() ? '[data-field="notes"]' : '[data-field="name"]')?.focus({preventScroll:true});
     else if (kind === 'picker') this.shadowRoot.querySelector('[data-field="picker-search"]')?.focus({preventScroll:true});
     if (kind === 'qr') {
       try { this.shadowRoot.getElementById('qr-display').innerHTML = window.SetupCodesQR.renderSVG(this._modal.code.value,{pixelSize:6,whiteColor:'#ffffff',blackColor:'#000000'}); }
@@ -1042,7 +1096,7 @@ class SetupCodeManagerPanel extends HTMLElement {
       else if (action === 'menu') this._openModal('menu');
       else if (action === 'add') { this._newDraft(); this._openModal('start'); }
       else if (['edit','edit-links','edit-codes'].includes(action) && record) {
-        this._newDraft(record);
+        this._newDraft(record,action === 'edit-codes');
         if (action === 'edit-codes') this._addSlot();
         if (action === 'edit-links') await this._openPicker(); else this._openModal('editor');
       }

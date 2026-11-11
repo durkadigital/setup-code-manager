@@ -77,6 +77,16 @@ test('stored status is rendered in desktop, mobile and selected-record details',
   assert.equal((state.html.match(/class="code-status stored"/g) || []).length, 3);
 });
 
+test('a reachable device with a missing code has a separate, labelled warning in both list layouts', () => {
+  const item = record({ codes: [], available: true, links: [{ ha_device_id: 'ha-a', active: true }] });
+  const { panel } = fixture(item);
+  const html = panel._renderListRow(item);
+  assert.match(html, /class="mobile-ha-status"[^]*class="dot online"[^]*Erreichbar/);
+  assert.match(html, /class="mobile-code-status"><span class="code-status missing"><svg[^]*Code fehlt<\/span><\/span>/);
+  assert.match(html, /<td><span class="code-status missing"><svg[^]*Code fehlt<\/span>/);
+  assert.doesNotMatch(html, /Code gespeichert/);
+});
+
 test('linked identity is read-only, escapes text, and accepts an explicitly empty HA area', () => {
   const item = record({ links: [{ ha_device_id: 'ha-a', active: true, name: '<b>HA lamp</b>', location: '' }] });
   const { panel } = fixture(item);
