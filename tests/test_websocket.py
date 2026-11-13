@@ -27,6 +27,7 @@ COMMANDS = {
     "ha_devices": {},
     "sync": {},
     "save": {"record": {"name": "Test", "secret": SECRET}, "expected_revision": 7},
+    "relink": {"record_id": "record-1", "ha_device_id": "device-1", "expected_revision": 7},
     "delete": {"record_id": "record-1", "expected_revision": 7},
     "archive": {"record_id": "record-1", "archived": True, "expected_revision": 7},
     "export": {"format": "json"},
@@ -34,7 +35,7 @@ COMMANDS = {
     "preview_import": {"format": "json", "content": SECRET},
     "import": {"token": "preview-1", "decisions": {"record-1": "add"}, "expected_revision": 7},
 }
-MUTATING = ("save", "delete", "archive", "import", "save_view_preferences")
+MUTATING = ("save", "relink", "delete", "archive", "import", "save_view_preferences")
 
 
 class Connection:
@@ -84,6 +85,7 @@ async def api(tmp_path):
     }
     manager.ha_devices.return_value = {"devices": []}
     manager.async_save.return_value = {"id": "record-1"}
+    manager.async_relink.return_value = {"id": "record-1"}
     manager.async_sync.return_value = []
     manager.export.return_value = {"format": "json", "content": "{}"}
     manager.async_export_pdf.return_value = {
@@ -134,6 +136,7 @@ def test_all_handlers_have_distinct_registered_types():
         websocket_api.ws_ha_devices,
         websocket_api.ws_sync,
         websocket_api.ws_save,
+        websocket_api.ws_relink,
         websocket_api.ws_delete,
         websocket_api.ws_archive,
         websocket_api.ws_export,
@@ -164,6 +167,7 @@ async def test_admin_commands_schedule_and_respond_through_real_ha_decorators(ap
         "ha_devices": ("ha_devices", ()),
         "sync": ("async_sync", ()),
         "save": ("async_save", (COMMANDS["save"]["record"], 7)),
+        "relink": ("async_relink", ("record-1", "device-1", 7)),
         "delete": ("async_delete", ("record-1", 7)),
         "archive": ("async_archive", ("record-1", True, 7)),
         "export": ("export", ("json",)),
@@ -355,6 +359,7 @@ async def test_errors_are_sanitized_before_ha_exception_handler(api, caplog, nam
         "ha_devices": "ha_devices",
         "sync": "async_sync",
         "save": "async_save",
+        "relink": "async_relink",
         "delete": "async_delete",
         "archive": "async_archive",
         "export": "export",

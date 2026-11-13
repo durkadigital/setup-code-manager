@@ -98,6 +98,16 @@ async def ws_save(manager, connection, msg):
     return await manager.async_save(msg["record"], msg["expected_revision"])
 
 
+@_endpoint(
+    "relink",
+    {vol.Required("record_id"): str, vol.Required("ha_device_id"): str, **_REVISION},
+)
+async def ws_relink(manager, connection, msg):
+    return await manager.async_relink(
+        msg["record_id"], msg["ha_device_id"], msg["expected_revision"]
+    )
+
+
 @_endpoint("delete", {vol.Required("record_id"): str, **_REVISION})
 async def ws_delete(manager, connection, msg):
     await manager.async_delete(msg["record_id"], msg["expected_revision"])
@@ -164,6 +174,7 @@ def async_register(hass: HomeAssistant) -> None:
         ws_ha_devices,
         ws_sync,
         ws_save,
+        ws_relink,
         ws_delete,
         ws_archive,
         ws_export,

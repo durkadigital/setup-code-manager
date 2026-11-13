@@ -19,6 +19,7 @@ const hasCode = (record, protocol) => recordCodes(record).some(code => !protocol
 const displayProtocols = record => [...new Set([...(record.protocols || []), ...recordCodes(record).map(code => code.protocol)])].filter(p => PROTOCOLS.includes(p));
 const protocolFrom = value => value.startsWith('MT:') ? 'matter' : value.startsWith('X-HM://') ? 'homekit' : /^90\d{30,}$/.test(value) ? 'zwave' : null;
 const blankRecord = () => ({ name:'', location:'', manufacturer:'', model:'', serial_number:'', notes:'', archived:false, codes:[], links:[] });
+const deviceField = (device, key) => (device[key] || '').trim().toLowerCase();
 
 class SetupCodeManagerPanel extends HTMLElement {
   constructor() {
@@ -58,6 +59,10 @@ class SetupCodeManagerPanel extends HTMLElement {
     this._t = translator(value?.language);
     if (userChanged && this._started) {
       if (this._modal?.kind === 'pdf') this._closeModal(true);
+      if (this._modal?.kind === 'relink-picker' || this._modal?.kind === 'relink-confirm') {
+        this._busy = false;
+        this._closeModal(true);
+      }
       this._preferenceScope = null; this._appliedPreferenceScope = null; this._viewsReady = false; this._viewsBusy = false;
       this._viewsWriteSequence = (this._viewsWriteSequence || 0) + 1; this._viewMigration = null;
       this._savedViews = []; this._defaultViewId = ''; this._activeViewId = ''; this._viewName = ''; this._legacyPreferences = {views:[],defaultViewId:''};
@@ -551,7 +556,8 @@ class SetupCodeManagerPanel extends HTMLElement {
   _renderDetails(record) {
     const t = this._t;
     const links = record.links || [];
-    return `<aside id="inventory-details" class="details" aria-label="${esc(record.name)}"><div class="detail-heading"><div><h2 title="${esc(record.name)}">${esc(record.name)}</h2></div>${this._iconButton('close-details',t('close'),'close')}</div><div class="detail-body"><div class="detail-meta">${this._codeStatus(record)}<p>${esc([record.location,record.model].filter(Boolean).join(' · ') || record.manufacturer || '')}</p>${record.archived ? `<span class="badge">${icon('archive')}${esc(t('archived'))}</span>` : ''}</div><div class="detail-actions">${this._button('edit',t('edit'),'','text',`data-id="${esc(record.id)}"`)}${this._button('pdf-record',t('pdfCard'),'pdf','text',`data-id="${esc(record.id)}"`)}</div><section class="detail-section"><h3>Home Assistant</h3><div class="detail-status">${this._status(record)}</div>${links.some(link => link.active === false) ? `<p class="muted small" style="margin-top:12px">${esc(t('removedHint'))}</p>` : ''}${links.filter(link => link.active !== false).map(link => `<div class="link-item"><span class="small muted">${esc(link.name || record.name)}</span><a class="button" href="/config/devices/device/${encodeURIComponent(link.ha_device_id)}">${icon('external')}${esc(t('openDevice'))}</a></div>`).join('')}${this._button('edit-links',t(links.length ? 'changeLinks' : 'linkDevice'),'link','text',`data-id="${esc(record.id)}"`)}</section><section class="detail-section"><h3>${esc(t('setupCodes'))}</h3>${recordCodes(record).length ? recordCodes(record).map(code => this._renderCode(code)).join('') : `<p class="muted">${esc(t('noCode'))}</p>`}${this._button('edit-codes',t('addCode'),'plus','text',`data-id="${esc(record.id)}" data-focus="detail-code-editor-${esc(record.id)}"`)}</section><section class="detail-section"><h3>${esc(t('note'))}</h3><p class="muted">${esc(record.notes || t('noNote'))}</p>${record.manufacturer || record.serial_number ? `<p class="small muted" style="margin-top:16px">${esc([record.manufacturer, record.serial_number].filter(Boolean).join(' · '))}</p>` : ''}</section><section class="detail-section detail-bottom">${this._button('archive',t(record.archived ? 'restore' : 'archiveAction'),record.archived ? 'restore' : 'archive','text',`data-id="${esc(record.id)}"`)}${this._button('delete',t('delete'),'trash','text danger',`data-id="${esc(record.id)}"`)}</section></div></aside>`;
+    const linkLabel = this._canRelink(record) ? 'relink' : links.length ? 'changeLinks' : 'linkDevice';
+    return `<aside id="inventory-details" class="details" aria-label="${esc(record.name)}"><div class="detail-heading"><div><h2 title="${esc(record.name)}">${esc(record.name)}</h2></div>${this._iconButton('close-details',t('close'),'close')}</div><div class="detail-body"><div class="detail-meta">${this._codeStatus(record)}<p>${esc([record.location,record.model].filter(Boolean).join(' · ') || record.manufacturer || '')}</p>${record.archived ? `<span class="badge">${icon('archive')}${esc(t('archived'))}</span>` : ''}</div><div class="detail-actions">${this._button('edit',t('edit'),'','text',`data-id="${esc(record.id)}"`)}${this._button('pdf-record',t('pdfCard'),'pdf','text',`data-id="${esc(record.id)}"`)}</div><section class="detail-section"><h3>Home Assistant</h3><div class="detail-status">${this._status(record)}</div>${links.some(link => link.active === false) ? `<p class="muted small" style="margin-top:12px">${esc(t('removedHint'))}</p>` : ''}${links.filter(link => link.active !== false).map(link => `<div class="link-item"><span class="small muted">${esc(link.name || record.name)}</span><a class="button" href="/config/devices/device/${encodeURIComponent(link.ha_device_id)}">${icon('external')}${esc(t('openDevice'))}</a></div>`).join('')}${this._button('edit-links',t(linkLabel),'link','text',`data-id="${esc(record.id)}"`)}</section><section class="detail-section"><h3>${esc(t('setupCodes'))}</h3>${recordCodes(record).length ? recordCodes(record).map(code => this._renderCode(code)).join('') : `<p class="muted">${esc(t('noCode'))}</p>`}${this._button('edit-codes',t('addCode'),'plus','text',`data-id="${esc(record.id)}" data-focus="detail-code-editor-${esc(record.id)}"`)}</section><section class="detail-section"><h3>${esc(t('note'))}</h3><p class="muted">${esc(record.notes || t('noNote'))}</p>${record.manufacturer || record.serial_number ? `<p class="small muted" style="margin-top:16px">${esc([record.manufacturer, record.serial_number].filter(Boolean).join(' · '))}</p>` : ''}</section><section class="detail-section detail-bottom">${this._button('archive',t(record.archived ? 'restore' : 'archiveAction'),record.archived ? 'restore' : 'archive','text',`data-id="${esc(record.id)}"`)}${this._button('delete',t('delete'),'trash','text danger',`data-id="${esc(record.id)}"`)}</section></div></aside>`;
   }
   _manualValue(code) {
     return code?.protocol === 'matter' && code.value?.startsWith('MT:') && typeof code.manual_value === 'string' && /^(?:[0-9]{11}|[0-9]{21})$/.test(code.manual_value) ? code.manual_value : '';
@@ -640,6 +646,8 @@ class SetupCodeManagerPanel extends HTMLElement {
     else if (kind === 'editor') html = this._renderEditor();
     else if (kind === 'scanner') html = this._modalFrame(t('scanTitle'), `<p>${esc(t('scanHint'))}</p><div id="scanner-error"></div><div class="scanner-frame"><video id="scan-video" autoplay muted playsinline></video><div class="scan-guide"></div><div class="camera-status" id="camera-status">${esc(t('cameraLoading'))}</div></div><p class="small">${esc(t('noPairing'))}</p><div class="scanner-buttons">${this._button('scan-capture',t('takePhoto'),'camera')}${this._button('scan-photo',t('photo'),'image')}${this._button('scan-manual',t('enterCode'),'keyboard')}</div>`);
     else if (kind === 'picker') html = this._renderPicker();
+    else if (kind === 'relink-picker') html = this._renderRelinkPicker();
+    else if (kind === 'relink-confirm') html = this._renderRelinkConfirm();
     else if (kind === 'choose-record') html = this._modalFrame(t('selectRecord'), `<p>${esc(t('selectRecordHint'))}</p><div class="choice-list">${this._modal.records.map(record => `<button type="button" class="choice" data-action="use-record" data-id="${esc(record.id)}">${icon(record.archived ? 'archive' : 'key')}<span class="grow">${esc(record.name)}<small class="muted" style="display:block">${esc([record.location,displayProtocols(record).map(p => protocolNames[p]).join(', ')].filter(Boolean).join(' · '))}</small>${record.archived ? `<small class="muted" style="display:block;margin-top:7px">${esc(t('archivedTarget'))}</small>` : ''}</span>${icon('chevron')}</button>`).join('')}</div>`,this._button('back-picker',t('back')));
     else if (kind === 'code-conflict') html = this._modalFrame(t('existingCodeTitle'), `<p>${esc(t('existingCodeHint'))}</p><h3>${esc(protocolNames[this._modal.current.protocol])}</h3><div class="compare-grid">${this._compareCode(this._modal.current,t('existing'),'existing')}${this._compareCode(this._modal.incoming,t('incoming'),'incoming')}</div>`,this._button('keep-code',t('keepExisting'))+this._button('replace-code',t('useIncoming'),'','primary'));
     else if (kind === 'duplicate') html = this._modalFrame(t('duplicateTitle'),this._notice(t('duplicateBody',{names:this._modal.names.join(', ')}),'warning'),this._button('back-editor',t('back'))+this._button('save-anyway',t('saveAnyway'),'','primary'));
@@ -707,11 +715,155 @@ class SetupCodeManagerPanel extends HTMLElement {
   _renderEditor() {
     this._applyDraftIdentity();
     const t = this._t; const draft = this._draft;
-    const body = `${this._captureQueue ? `<div class="capture-progress" role="status">${esc(t('captureProgress',{current:this._captureQueue.index+1,total:this._captureQueue.ids.length,protocol:protocolNames[this._captureQueue.protocol]}))}</div>` : ''}<form id="record-form">${draft.archived ? this._notice(t('archivedTarget')) : ''}${this._renderIdentity()}${this._field('notes','textarea')}<details class="more" ${this._moreOpen ? 'open' : ''}><summary>${esc(t('moreDetails'))}</summary><div><div class="field-row">${this._field('manufacturer')}${this._field('model')}</div>${this._field('serial_number')}</div></details><section class="editor-section"><h3>${esc(t('setupCodes'))}</h3>${draft.codes.map((code,index) => `<div class="editor-code"><div class="code-title"><select data-field="code-protocol" data-index="${index}" aria-label="${esc(t('protocol'))}" ${this._captureQueue ? 'disabled' : ''}>${PROTOCOLS.map(p => `<option value="${p}" ${code.protocol === p ? 'selected' : ''} ${draft.codes.some((other,i) => i !== index && other.protocol === p) ? 'disabled' : ''}>${protocolNames[p]}</option>`).join('')}</select>${this._iconButton('remove-code',t('removeCode'),'trash',`data-index="${index}"`)}</div><label class="field"><span>${esc(t('codeValue'))}</span><div class="input-secret"><input type="${this._formRevealed.has(code.id) ? 'text' : 'password'}" data-field="code-value" data-focus="code-${index}" data-index="${index}" value="${esc(code.value)}" autocomplete="off" spellcheck="false" maxlength="4096">${this._iconButton('form-reveal',t(this._formRevealed.has(code.id) ? 'hide' : 'reveal'),'eye',`data-index="${index}"`)}</div></label><div class="code-tools">${this._button('code-scan',t(this._canLiveScan() ? (code.value ? 'rescan' : 'scan') : 'takePhoto'),'camera','text',`data-protocol="${code.protocol}"`)}${this._button('code-photo',t('photo'),'image','text',`data-protocol="${code.protocol}"`)}</div><label class="field"><span>${esc(t('codeLabel'))}</span><input type="text" data-field="code-label" data-focus="label-${index}" data-index="${index}" value="${esc(code.label)}" placeholder="${esc(t('codeLabelPlaceholder'))}" maxlength="256"></label></div>`).join('')}${draft.codes.length < PROTOCOLS.length ? this._button('add-slot',t('addCode'),'plus','text') : ''}</section><section class="editor-section"><h3>Home Assistant</h3><div class="link-box">${draft.links?.length ? draft.links.map((link,index) => `<div class="link-item">${icon('link')}<span>${esc(link.name || this._haDevices.find(d => d.id === link.ha_device_id)?.name || this._devices.find(r => r.links?.some(l => l.ha_device_id === link.ha_device_id))?.name || link.ha_device_id)}${link.active === false ? `<small class="muted" style="display:block">${esc(t('unlinked'))}</small>` : ''}</span>${this._iconButton('remove-link',t('removeLink'),'close',`data-index="${index}"`)}</div>`).join('') : `<p class="muted">${esc(t('noLink'))}</p>`}${this._captureQueue ? '' : this._button('picker',t(draft.links?.length ? 'changeLinks' : 'linkDevice'),'link','text')}<p class="muted">${esc(t('linkLater'))}</p></div></section></form>`;
+    const body = `${this._captureQueue ? `<div class="capture-progress" role="status">${esc(t('captureProgress',{current:this._captureQueue.index+1,total:this._captureQueue.ids.length,protocol:protocolNames[this._captureQueue.protocol]}))}</div>` : ''}<form id="record-form">${draft.archived ? this._notice(t('archivedTarget')) : ''}${this._renderIdentity()}${this._field('notes','textarea')}<details class="more" ${this._moreOpen ? 'open' : ''}><summary>${esc(t('moreDetails'))}</summary><div><div class="field-row">${this._field('manufacturer')}${this._field('model')}</div>${this._field('serial_number')}</div></details><section class="editor-section"><h3>${esc(t('setupCodes'))}</h3>${draft.codes.map((code,index) => `<div class="editor-code"><div class="code-title"><select data-field="code-protocol" data-index="${index}" aria-label="${esc(t('protocol'))}" ${this._captureQueue ? 'disabled' : ''}>${PROTOCOLS.map(p => `<option value="${p}" ${code.protocol === p ? 'selected' : ''} ${draft.codes.some((other,i) => i !== index && other.protocol === p) ? 'disabled' : ''}>${protocolNames[p]}</option>`).join('')}</select>${this._iconButton('remove-code',t('removeCode'),'trash',`data-index="${index}"`)}</div><label class="field"><span>${esc(t('codeValue'))}</span><div class="input-secret"><input type="${this._formRevealed.has(code.id) ? 'text' : 'password'}" data-field="code-value" data-focus="code-${index}" data-index="${index}" value="${esc(code.value)}" autocomplete="off" spellcheck="false" maxlength="4096">${this._iconButton('form-reveal',t(this._formRevealed.has(code.id) ? 'hide' : 'reveal'),'eye',`data-index="${index}"`)}</div></label><div class="code-tools">${this._button('code-scan',t(this._canLiveScan() ? (code.value ? 'rescan' : 'scan') : 'takePhoto'),'camera','text',`data-protocol="${code.protocol}"`)}${this._button('code-photo',t('photo'),'image','text',`data-protocol="${code.protocol}"`)}</div><label class="field"><span>${esc(t('codeLabel'))}</span><input type="text" data-field="code-label" data-focus="label-${index}" data-index="${index}" value="${esc(code.label)}" placeholder="${esc(t('codeLabelPlaceholder'))}" maxlength="256"></label></div>`).join('')}${draft.codes.length < PROTOCOLS.length ? this._button('add-slot',t('addCode'),'plus','text') : ''}</section><section class="editor-section"><h3>Home Assistant</h3><div class="link-box">${draft.links?.length ? draft.links.map((link,index) => `<div class="link-item">${icon('link')}<span>${esc(link.name || this._haDevices.find(d => d.id === link.ha_device_id)?.name || this._devices.find(r => r.links?.some(l => l.ha_device_id === link.ha_device_id))?.name || link.ha_device_id)}${link.active === false ? `<small class="muted" style="display:block">${esc(t('unlinked'))}</small>` : ''}</span>${this._iconButton('remove-link',t('removeLink'),'close',`data-index="${index}"`)}</div>`).join('') : `<p class="muted">${esc(t('noLink'))}</p>`}${this._captureQueue ? '' : this._button('picker',t(this._canRelink(this._baseRecord) ? 'relink' : draft.links?.length ? 'changeLinks' : 'linkDevice'),'link','text')}<p class="muted">${esc(t('linkLater'))}</p></div></section></form>`;
     return this._modalFrame(t(draft.id ? 'editTitle' : 'addTitle'),body,this._button('close-modal',t(this._captureQueue ? 'endCapture' : 'cancel'))+(this._captureQueue ? this._button('capture-skip',t('skipCapture')) : '')+`<button type="submit" form="record-form" class="button primary" ${this._busy ? 'disabled' : ''}>${this._busy && !this._readingPhoto ? '<span class="spinner"></span>' : ''}${esc(t(this._busy && !this._readingPhoto ? 'saving' : this._captureQueue ? 'saveNext' : 'save'))}</button>`,false,this._renderEditorFeedback());
   }
   _pickerRecords(device) { return this._devices.filter(record => (device.record_ids || []).includes(record.id) || record.links?.some(link => link.ha_device_id === device.id)); }
   _pickerMissing(device) { return !this._pickerRecords(device).some(record => hasCode(record,this._activeProtocol)); }
+  _canRelink(record) {
+    return !!record?.id && !record.archived && !isLinked(record) &&
+      record.links?.some(link => link.active === false);
+  }
+  _relinkSuggestion(record, devices) {
+    const same = (device, key) => !!deviceField(record,key) && deviceField(record,key) === deviceField(device,key);
+    const sameModel = device => same(device,'manufacturer') && same(device,'model');
+    const serial = deviceField(record,'serial_number');
+    if (serial) {
+      const matches = devices.filter(device => sameModel(device) && same(device,'serial_number'));
+      if (matches.length) return matches.length === 1 ? {id:matches[0].id,label:'relinkSerialMatch'} : null;
+    }
+    const matches = devices.filter(device => sameModel(device) && same(device,'name') && same(device,'location') &&
+      !(serial && deviceField(device,'serial_number') && !same(device,'serial_number')));
+    return matches.length === 1 ? {id:matches[0].id,label:'relinkPossibleMatch'} : null;
+  }
+  _renderRelinkPicker() {
+    const t = this._t;
+    const {source, devices, query, loading, unavailable, reload, fromEditor} = this._modal;
+    let body = `<p>${esc(t('relinkPickerHint',{name:source.name}))}</p>`;
+    if (loading) body += `<div class="loading" role="status"><span class="spinner"></span>${esc(t('loading'))}</div>`;
+    else if (!unavailable && !reload) {
+      const search = `<label class="search">${icon('search')}<input type="search" data-field="relink-search" data-focus="relink-search" value="${esc(query)}" placeholder="${esc(t('relinkSearch'))}" aria-label="${esc(t('relinkSearch'))}"></label>`;
+      body += search + this._renderRelinkDevices(source,devices,query);
+    }
+    const back = fromEditor ? this._button('back-editor',t('back')) : this._button('close-modal',t('cancel'));
+    const retry = reload ? this._button('retry-relink',t('retry'),'refresh','primary') : '';
+    return this._modalFrame(t('relinkPickerTitle'),body,back+retry);
+  }
+  _renderRelinkDevices(source, devices, query) {
+    const t = this._t;
+    const suggestion = this._relinkSuggestion(source,devices);
+    const queryText = query.trim().toLowerCase();
+    const matches = devices.filter(device =>
+      [device.name,device.location,device.manufacturer,device.model,device.serial_number]
+        .some(value => (value || '').toLowerCase().includes(queryText)));
+    const rank = device => device.relink_available ? (device.id === suggestion?.id ? 0 : 1) : 2;
+    matches.sort((a,b) => rank(a) - rank(b) || a.name.localeCompare(b.name,this._hass?.language));
+    const items = matches.map(device => {
+      const match = device.relink_available && suggestion?.id === device.id ? suggestion.label : '';
+      const details = [device.location,[device.manufacturer,device.model].filter(Boolean).join(' ')].filter(Boolean).join(' · ');
+      const serial = device.serial_number ? `<small>${esc(t('relinkSerial',{serial:device.serial_number}))}</small>` : '';
+      const status = match ? `<small class="status-text">${esc(t(match))}</small>` :
+        device.relink_available ? '' : `<small>${esc(t('relinkProtected'))}</small>`;
+      return `<button type="button" class="picker-item" data-action="pick-relink-device" data-id="${esc(device.id)}" ${device.relink_available ? '' : 'disabled'}>${icon(deviceIcon(device))}<span class="grow"><strong>${esc(device.name)}</strong><small>${esc(details)}</small>${serial}${status}</span>${icon('chevron')}</button>`;
+    }).join('');
+    return `<div class="picker-list">${items || `<p class="muted">${esc(t('noHA'))}</p>`}</div>`;
+  }
+  _renderRelinkConfirm() {
+    const t = this._t;
+    const {picker, device} = this._modal;
+    const serialDiffers = !!(device.serial_number?.trim() && picker.source.serial_number?.trim() &&
+      deviceField(device,'serial_number') !== deviceField(picker.source,'serial_number'));
+    const savedSerial = serialDiffers ? `<dt>${esc(t('relinkPreviousSerial'))}</dt><dd>${esc(picker.source.serial_number)}</dd>` : '';
+    const deviceSerial = device.serial_number ? `<dt>${esc(t('serial'))}</dt><dd>${esc(device.serial_number)}</dd>` : '';
+    const target = [device.name,device.location || t('noArea'),device.model].filter(Boolean).join(' · ');
+    const body = `<section class="record-identity"><dl><dt>${esc(t('existing'))}</dt><dd>${esc(picker.source.name)}</dd>${savedSerial}<dt>${esc(t('relinkTarget'))}</dt><dd>${esc(target)}</dd>${deviceSerial}</dl></section>
+      ${serialDiffers ? this._notice(t('relinkSerialDiffers'),'warning') : ''}<p>${esc(t('relinkConfirmHint'))}</p>${device.record_ids?.some(id => id !== picker.source.id) ? `<p>${esc(t('relinkConsolidateHint'))}</p>` : ''}`;
+    return this._modalFrame(t('relinkConfirmTitle'),body,this._button('back-relink-picker',t('back'))+this._button('confirm-relink',t(this._busy ? 'saving' : 'relink'),'link','primary'));
+  }
+  async _openRelinkPicker(fromEditor) {
+    this._openModal('relink-picker',{source:this._baseRecord,fromEditor,devices:[],query:'',loading:true});
+    const picker = this._modal;
+    try {
+      const snapshot = await this._refresh(false);
+      if (this._modal !== picker) return;
+      if (!snapshot) throw new Error('load_failed');
+      const current = snapshot.devices.find(record => record.id === picker.source.id);
+      if (!this._canRelink(current)) {
+        picker.unavailable = true;
+        this._modalError = this._t('relinkUnavailable');
+        return;
+      }
+      picker.source = current;
+      picker.revision = snapshot.revision;
+      const result = await this._api('ha_devices');
+      if (this._modal !== picker) return;
+      picker.devices = result.devices || [];
+    } catch (error) {
+      if (this._modal !== picker) return;
+      picker.reload = true;
+      this._modalError = this._errorText(error,'loadFailed');
+    } finally {
+      if (this._modal === picker) {
+        picker.loading = false;
+        this._renderModal();
+      }
+    }
+  }
+  _selectRelinkDevice(id) {
+    const picker = this._modal;
+    if (picker?.kind !== 'relink-picker') return;
+    const device = picker.devices.find(item => item.id === id && item.relink_available === true);
+    if (device) this._openModal('relink-confirm',{picker,device});
+  }
+  async _confirmRelink() {
+    const dialog = this._modal;
+    if (dialog?.kind !== 'relink-confirm' || this._busy) return;
+    const {picker,device} = dialog;
+    this._busy = true;
+    this._modalError = '';
+    this._renderModal();
+    let result;
+    try {
+      result = await this._api('relink',{record_id:picker.source.id,ha_device_id:device.id,expected_revision:picker.revision});
+    } catch (error) {
+      if (this._modal !== dialog) return;
+      this._busy = false;
+      if (['conflict','not_found','device_removed','relink_blocked'].includes(error?.code)) {
+        this._modal = {...picker,devices:[],reload:true};
+        this._modalError = this._t(error.code === 'relink_blocked' ? 'relinkBlocked' : 'relinkChanged');
+      } else this._modalError = this._errorText(error);
+      this._renderModal();
+      return;
+    }
+    if (this._modal !== dialog) return;
+    this._busy = false;
+    this._selectedId = picker.source.id;
+    this._closeModal(true);
+    const generation = this._dialogGeneration, userId = this._hass?.user?.id;
+    const refreshed = await this._refresh(false);
+    if (generation !== this._dialogGeneration || userId !== this._hass?.user?.id) return;
+    const current = refreshed ? refreshed.devices.find(record => record.id === result.id) : result;
+    if (!current?.links.some(link => link.ha_device_id === device.id && link.active)) {
+      this._toast(this._t(current && !isLinked(current) ? 'relinkDeviceGone' : 'relinkChanged'));
+      return;
+    }
+    if (this._tab === 'unlinked' && this._selectedId === picker.source.id) {
+      this._tab = 'all';
+      this._selection.clear();
+      this._activeViewId = '';
+    }
+    if (!refreshed) {
+      this._renderMain();
+      this._toast(this._t('relinkRefreshFailed'));
+      return;
+    }
+    const visible = this._visibleDevices().some(record => record.id === result.id);
+    if (visible && this._group === 'room') {
+      this._collapsedGroups.delete(groupRecordsByRoom([current],this._hass?.language)[0].key);
+    }
+    this._renderMain();
+    this._toast(this._t(visible ? 'relinkSaved' : 'relinkSavedFiltered'));
+  }
   _renderPicker() {
     const t = this._t;
     const query = (this._pickerQuery || '').trim().toLocaleLowerCase();
@@ -725,6 +877,15 @@ class SetupCodeManagerPanel extends HTMLElement {
     return this._modalFrame(t('pickerTitle'),body,this._button('back-editor',t('back'))+this._button('without-link',t('withoutLink'),'','text'));
   }
   async _openPicker() {
+    if (this._canRelink(this._baseRecord)) {
+      if (this._dirty) {
+        this._draftError = this._t('relinkDirty');
+        this._draftErrorCode = '';
+        this._renderModal();
+        return;
+      }
+      return this._openRelinkPicker(this._modal?.kind === 'editor');
+    }
     this._pickerQuery = ''; this._pickerAll = false; this._pickerLoading = true;
     this._openModal('picker');
     try {
@@ -1064,6 +1225,10 @@ class SetupCodeManagerPanel extends HTMLElement {
     if (field === 'search') { this._query = el.value; this._selection.clear(); this._renderMain(); }
     else if (field === 'view-name') this._viewName = el.value;
     else if (field === 'picker-search') { this._pickerQuery = el.value; this._renderModal(); }
+    else if (field === 'relink-search' && this._modal?.kind === 'relink-picker') {
+      this._modal.query = el.value;
+      this._renderModal();
+    }
     else if (this._draft && ['name','location','manufacturer','model','serial_number','notes'].includes(field)) { this._draft[field] = el.value; this._dirty = true; }
     else if (this._draft && ['code-value','code-label'].includes(field)) {
       const code = this._draft.codes[Number(el.dataset.index)];
@@ -1164,6 +1329,10 @@ class SetupCodeManagerPanel extends HTMLElement {
       else if (action === 'picker') await this._openPicker();
       else if (action === 'picker-all' || action === 'picker-missing') { this._pickerAll = action === 'picker-all'; this._renderModal(); }
       else if (action === 'pick-device') this._selectHADevice(id);
+      else if (action === 'pick-relink-device') this._selectRelinkDevice(id);
+      else if (action === 'confirm-relink') await this._confirmRelink();
+      else if (action === 'back-relink-picker' && this._modal?.kind === 'relink-confirm') this._openModal('relink-picker',this._modal.picker);
+      else if (action === 'retry-relink' && this._modal?.kind === 'relink-picker') await this._openRelinkPicker(this._modal.fromEditor);
       else if (action === 'use-record') this._useHADevice(this._pendingDevice,this._devices.find(item => item.id === id));
       else if (action === 'back-picker') this._openModal('picker');
       else if (action === 'without-link') { this._draft.links = []; this._dirty = true; this._openModal('editor'); }

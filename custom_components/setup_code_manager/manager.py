@@ -56,6 +56,31 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _hardware_fields(device: dr.DeviceEntry) -> dict[str, str]:
+    return {
+        "manufacturer": (device.manufacturer or "")[:256],
+        "model": (device.model or device.model_id or "")[:256],
+        "serial_number": (device.serial_number or "")[:256],
+    }
+
+
+def _can_reuse_link(device: dr.DeviceEntry, owners: list[dict[str, Any]]) -> bool:
+    """Allow consolidation only when the linked row holds no separate inventory data."""
+    if not owners:
+        return True
+    if len(owners) != 1:
+        return False
+    owner = owners[0]
+    return (
+        owner["links"] == [{"ha_device_id": device.id}]
+        and not (owner["archived"] or owner["codes"] or owner["notes"] or owner["source_refs"])
+        and all(
+            not owner[field] or owner[field] == value
+            for field, value in _hardware_fields(device).items()
+        )
+    )
+
+
 class SetupCodesManager:
     def __init__(
         self,
@@ -204,10 +229,10 @@ class SetupCodesManager:
         return area.name if area else ""
 
     def ha_devices(self) -> dict[str, Any]:
-        owners: dict[str, list[str]] = {}
+        owners: dict[str, list[dict[str, Any]]] = {}
         for record in self.store.devices:
             for link in record["links"]:
-                owners.setdefault(link["ha_device_id"], []).append(record["id"])
+                owners.setdefault(link["ha_device_id"], []).append(record)
         devices = []
         for device in registry_devices(self.hass):
             if device.entry_type == dr.DeviceEntryType.SERVICE:
@@ -222,17 +247,17 @@ class SetupCodesManager:
                 entry = self.hass.config_entries.async_get_entry(entry_id)
                 if entry:
                     domains.add(entry.domain)
+            linked_records = owners.get(device.id, [])
             devices.append(
                 {
                     "id": device.id,
                     **device_identity(self.hass, device),
                     **device_organization(self.hass, device),
-                    "manufacturer": device.manufacturer or "",
-                    "model": device.model or "",
-                    "serial_number": device.serial_number or "",
+                    **_hardware_fields(device),
                     "protocols": device_protocols(device),
                     "integration_names": sorted(domains),
-                    "record_ids": owners.get(device.id, []),
+                    "record_ids": [record["id"] for record in linked_records],
+                    "relink_available": _can_reuse_link(device, linked_records),
                     "available": device_is_available(self.hass, device.id),
                     "via_device_id": device.via_device_id,
                 }
@@ -291,8 +316,13 @@ class SetupCodesManager:
                     changed = True
             # Include archived records and links to integrations outside discovery.
             # Keep the last persisted HA identity if every linked device disappears.
+            registry = dr.async_get(self.hass)
             for record in data["devices"]:
                 identity = linked_identity(self.hass, record["links"])
+                if identity and len(record["links"]) == 1 and not record["serial_number"]:
+                    device = registry.async_get(record["links"][0]["ha_device_id"])
+                    if device is not None and device.serial_number:
+                        identity["serial_number"] = device.serial_number[:256]
                 if identity and any(record[field] != value for field, value in identity.items()):
                     record.update(identity, updated_at=_now())
                     changed = True
@@ -380,6 +410,46 @@ class SetupCodesManager:
             data["ignored_ha_device_ids"] = [
                 i for i in data["ignored_ha_device_ids"] if i not in link_ids
             ]
+            await self._commit(data)
+            return serialize_record(self.hass, record)
+
+    async def async_relink(
+        self, record_id: str, ha_device_id: str, expected_revision: int
+    ) -> dict[str, Any]:
+        """Reattach a disconnected record and consolidate an empty discovery row atomically."""
+        _identifier(record_id, "record ID")
+        _identifier(ha_device_id, "Home Assistant device ID")
+        async with self._lock:
+            self._check_revision(expected_revision)
+            data = self.store.data
+            records = data["devices"]
+            record = next((item for item in records if item["id"] == record_id), None)
+            if record is None:
+                raise InventoryError("not_found")
+            registry = dr.async_get(self.hass)
+            device = registry.async_get(ha_device_id)
+            if device is None or device.entry_type == dr.DeviceEntryType.SERVICE:
+                raise InventoryError("device_removed")
+            if (
+                record["archived"]
+                or not record["links"]
+                or linked_identity(self.hass, record["links"])
+            ):
+                raise InventoryError("relink_blocked")
+
+            link = {"ha_device_id": ha_device_id}
+            owners = [item for item in records if link in item["links"]]
+            if not _can_reuse_link(device, owners):
+                raise InventoryError("relink_blocked")
+
+            record.update(device_identity(self.hass, device), links=[link], updated_at=_now())
+            for field, value in _hardware_fields(device).items():
+                if not record[field]:
+                    record[field] = value
+            if owners:
+                records.remove(owners[0])
+            if ha_device_id in data["ignored_ha_device_ids"]:
+                data["ignored_ha_device_ids"].remove(ha_device_id)
             await self._commit(data)
             return serialize_record(self.hass, record)
 

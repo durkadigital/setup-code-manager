@@ -408,6 +408,104 @@ async def test_removed_ha_device_preserves_codes_and_user_metadata(manager):
     assert not saved["archived"]
 
 
+async def test_relink_replaces_empty_discovery_record_and_keeps_saved_codes(manager):
+    registry = dr.async_get(manager.hass)
+    old = add_device(manager, "before-pairing")
+    await manager.async_sync()
+    original = manager.store.devices[0]
+    original["codes"] = [{"id": "code", "protocol": "matter", "value": "34970112332"}]
+    original["notes"] = "Keep this note"
+    original = await manager.async_save(original, revision(manager))
+    registry.async_remove_device(old.id)
+    new = add_device(manager, "after-pairing")
+    area = ar.async_get(manager.hass).async_create("Bedroom")
+    registry.async_update_device(
+        new.id, name_by_user="New name", area_id=area.id, serial_number="TEST-001"
+    )
+    await manager.async_sync()
+    before = manager.list_data()["devices"]
+    assert len(before) == 2
+    assert any(item["linked"] and not item["codes"] for item in before)
+    assert any(not item["linked"] and item["codes"] for item in before)
+    assert manager.ha_devices()["devices"][0]["relink_available"] is True
+
+    result = await manager.async_relink(original["id"], new.id, revision(manager))
+    await manager.async_sync()
+    assert manager.list_data()["devices"] == [result]
+    assert result["id"] == original["id"]
+    assert result["created_at"] == original["created_at"]
+    assert result["codes"] == original["codes"]
+    assert result["notes"] == original["notes"]
+    assert result["linked"] and [link["ha_device_id"] for link in result["links"]] == [new.id]
+    assert (result["name"], result["location"], result["serial_number"]) == (
+        "New name",
+        "Bedroom",
+        "TEST-001",
+    )
+
+
+@pytest.mark.parametrize(
+    "protected_fields",
+    [
+        {"notes": "Other record's note"},
+        {"codes": [{"id": "other-code", "protocol": "matter", "value": "34970112332"}]},
+        {"archived": True},
+        {"source_refs": ["legacy:previous"]},
+        {"serial_number": "Manual serial"},
+    ],
+)
+async def test_relink_blocks_consolidation_when_other_record_has_its_own_data(
+    manager, protected_fields
+):
+    old = add_device(manager, "old")
+    original = await manager.async_save(
+        new_record("Original", links=[{"ha_device_id": old.id}]), revision(manager)
+    )
+    dr.async_get(manager.hass).async_remove_device(old.id)
+    device = add_device(manager, "new")
+    await manager.async_save(
+        new_record("Second", links=[{"ha_device_id": device.id}], **protected_fields),
+        revision(manager),
+    )
+    assert manager.ha_devices()["devices"][0]["relink_available"] is False
+    before = manager.store.data
+    with pytest.raises(InventoryError, match="relink_blocked"):
+        await manager.async_relink(original["id"], device.id, revision(manager))
+    assert manager.store.data == before
+
+
+async def test_relink_rechecks_revision_and_registry_before_writing(manager):
+    registry = dr.async_get(manager.hass)
+    old = add_device(manager, "old")
+    original = await manager.async_save(
+        new_record("Original", links=[{"ha_device_id": old.id}]), revision(manager)
+    )
+    device = add_device(manager, "target")
+    with pytest.raises(InventoryError, match="relink_blocked"):
+        await manager.async_relink(original["id"], device.id, revision(manager))
+    registry.async_remove_device(old.id)
+    await manager.async_sync()
+    before = manager.store.data
+    with pytest.raises(InventoryError, match="conflict"):
+        await manager.async_relink(original["id"], device.id, revision(manager) - 1)
+    registry.async_remove_device(device.id)
+    with pytest.raises(InventoryError, match="device_removed"):
+        await manager.async_relink(original["id"], device.id, revision(manager))
+    assert manager.store.data == before
+
+
+async def test_sync_caches_serial_number_when_ha_reports_it_later(manager):
+    device = add_device(manager)
+    registry = dr.async_get(manager.hass)
+    await manager.async_sync()
+    assert manager.store.devices[0]["serial_number"] == ""
+    registry.async_update_device(device.id, serial_number="LATE-001")
+    await manager.async_sync()
+    registry.async_remove_device(device.id)
+    await manager.async_sync()
+    assert manager.list_data()["devices"][0]["serial_number"] == "LATE-001"
+
+
 async def test_protocols_share_one_device_and_offline_is_linked(manager):
     device = add_device(manager, protocols=("matter", "homekit_controller"))
     await manager.async_sync()

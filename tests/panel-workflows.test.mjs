@@ -66,6 +66,141 @@ function click(panel, action, fields = {}) {
   return panel._onClick({ target:{ closest:() => ({ disabled:false, dataset:{ action,...fields } }) } });
 }
 
+function relinkFixture() {
+  const { panel,state } = fixture();
+  const previous = record('saved',{
+    name:'Right switch', manufacturer:'Synthetic Manufacturer', model:'Switch',
+    links:[{ha_device_id:'old-ha',active:false}], linked:false, notes:'Keep this note',
+    codes:[{id:'code',protocol:'matter',value:'MT:SYNTHETIC'}]
+  });
+  const duplicate = record('new-empty',{ links:[{ha_device_id:'new-ha',active:true}], linked:true });
+  const returned = {
+    id:'new-ha', name:previous.name, location:previous.location, manufacturer:previous.manufacturer,
+    model:previous.model, serial_number:'SYN-42', protocols:['matter'],
+    record_ids:[duplicate.id], relink_available:true
+  };
+  const linked = {...previous, links:[{ha_device_id:returned.id,active:true}], linked:true};
+  const api = {devices:[returned], records:[previous,duplicate], revision:2, requests:[]};
+  panel._devices = [previous,duplicate]; panel._selectedId = previous.id; panel._tab = 'unlinked';
+  api.save = async () => {
+    api.records = [linked];
+    api.revision++;
+    return linked;
+  };
+  panel._api = async (command,payload) => {
+    if (command === 'list') return {devices:api.records,revision:api.revision,instance_id:'synthetic-ha'};
+    if (command === 'ha_devices') return {devices:api.devices};
+    api.requests.push({command,payload});
+    return api.save();
+  };
+  return {panel,state,previous,returned,linked,api};
+}
+
+test('relinking a returned device keeps the saved record and confirms the empty duplicate first', async () => {
+  const { panel,state,previous,returned,linked,api } = relinkFixture();
+  await click(panel,'edit-links',{id:previous.id});
+  assert.equal(panel._modal.kind,'relink-picker');
+  assert.match(panel._renderRelinkPicker(), /Possible match/);
+  await click(panel,'pick-relink-device',{id:returned.id});
+  assert.equal(panel._modal.kind,'relink-confirm');
+  assert.equal(panel._draft.id,previous.id);
+  assert.match(panel._renderRelinkConfirm(), /additional record without its own data/);
+  assert.doesNotMatch(panel._renderRelinkConfirm(), /MT:SYNTHETIC/);
+  assert.deepEqual(api.requests,[]);
+  await click(panel,'confirm-relink');
+
+  assert.deepEqual(api.requests,[{command:'relink',payload:{record_id:previous.id,ha_device_id:returned.id,expected_revision:2}}]);
+  assert.deepEqual(panel._devices,[linked]);
+  assert.equal(panel._selectedId,previous.id);
+  assert.equal(panel._tab,'all');
+  assert.deepEqual(panel._visibleDevices(),[linked]);
+  assert.match(state.toasts.at(-1),/Device relinked/);
+});
+
+test('relink picker prioritizes a unique manufacturer, model and serial match even after name and room change', async () => {
+  const { panel,previous,returned,api } = relinkFixture();
+  previous.serial_number = ' SYN-42 ';
+  returned.name = 'Zulu renamed'; returned.location = 'New room';
+  api.devices.unshift({...returned,id:'a',name:'Alpha',serial_number:'SYN-97'});
+  await click(panel,'edit-links',{id:previous.id});
+  const html = panel._renderRelinkPicker();
+  assert.match(html,/Matching serial number and model/);
+  assert.ok(html.indexOf('Zulu renamed') < html.indexOf('Alpha'));
+  assert.equal(panel._modal.kind,'relink-picker');
+  assert.deepEqual(api.requests,[]);
+});
+
+test('protected and ambiguous matches are not suggested even when searching narrows the list', async () => {
+  const { panel,previous,returned,api } = relinkFixture();
+  previous.serial_number = returned.serial_number;
+  api.devices.push({...returned,id:'protected',name:'Protected',relink_available:false});
+  await click(panel,'edit-links',{id:previous.id});
+  assert.match(panel._renderRelinkPicker(),/data-id="protected" disabled/);
+  await click(panel,'pick-relink-device',{id:'protected'});
+  assert.equal(panel._modal.kind,'relink-picker');
+  panel._onInput(value('relink-search',returned.name));
+  assert.doesNotMatch(panel._renderRelinkPicker(),/Matching serial number and model|Possible match/);
+  assert.deepEqual(api.requests,[]);
+});
+
+test('a known serial mismatch has no recommendation and both serials are visible before confirmation', async () => {
+  const { panel,previous,returned,api } = relinkFixture();
+  previous.serial_number = 'SYN-OLD';
+  await click(panel,'edit-links',{id:previous.id});
+  assert.doesNotMatch(panel._renderRelinkPicker(),/Matching serial number and model|Possible match/);
+  await click(panel,'pick-relink-device',{id:returned.id});
+  assert.match(panel._renderRelinkConfirm(),/SYN-OLD.*SYN-42/);
+  assert.match(panel._renderRelinkConfirm(),/The serial numbers differ/);
+  assert.deepEqual(api.requests,[]);
+});
+
+test('conflict requires reloading the picker and a fresh explicit confirmation', async () => {
+  const { panel,previous,returned,api } = relinkFixture();
+  const save = api.save;
+  api.save = async () => { throw {code:'conflict'}; };
+  await click(panel,'edit-links',{id:previous.id});
+  await click(panel,'pick-relink-device',{id:returned.id});
+  await click(panel,'confirm-relink');
+  assert.equal(panel._modal.kind,'relink-picker');
+  assert.match(panel._renderRelinkPicker(),/Try again/);
+  assert.equal(panel._draft.id,previous.id);
+  api.revision++;
+  api.save = save;
+  await click(panel,'retry-relink');
+  assert.equal(api.requests.length,1);
+  await click(panel,'pick-relink-device',{id:returned.id});
+  await click(panel,'confirm-relink');
+  assert.deepEqual(api.requests.map(item => item.payload.expected_revision),[2,3]);
+});
+
+test('a device that vanishes during the write remains in the unlinked tab with its existing code', async () => {
+  const { panel,state,previous,returned,linked,api } = relinkFixture();
+  api.save = async () => {
+    const removed = {...linked,links:[{ha_device_id:returned.id,active:false}],linked:false};
+    api.records = [removed];
+    api.revision++;
+    return removed;
+  };
+  await click(panel,'edit-links',{id:previous.id});
+  await click(panel,'pick-relink-device',{id:returned.id});
+  await click(panel,'confirm-relink');
+  assert.equal(panel._tab,'unlinked');
+  assert.equal(panel._selectedId,previous.id);
+  assert.deepEqual(panel._visibleDevices()[0].codes,previous.codes);
+  assert.match(state.toasts.at(-1),/removed from Home Assistant during relinking/);
+});
+
+test('relinking from the editor asks to save unsaved changes first', async () => {
+  const { panel,previous,api } = relinkFixture();
+  await click(panel,'edit',{id:previous.id});
+  panel._onInput(value('notes','Unsaved note'));
+  await click(panel,'picker');
+  assert.equal(panel._modal.kind,'editor');
+  assert.equal(panel._draft.notes,'Unsaved note');
+  assert.match(panel._renderEditorFeedback(),/Save your changes first/);
+  assert.deepEqual(api.requests,[]);
+});
+
 test('saving a view sends current structured controls to HA but never the code search or inventory', async () => {
   const { panel,state,storage } = fixture();
   panel._query = 'MT:SYNTHETIC-PRIVATE-SEARCH'; panel._viewName = 'Office missing codes';

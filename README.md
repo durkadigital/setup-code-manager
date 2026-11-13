@@ -7,7 +7,7 @@ Scanne einen QR-Code, wähle ein Foto oder gib den Code von Hand ein.
 Dein Inventar bleibt lokal in Home Assistant und auch ohne Geräteverknüpfung erhalten.
 
 [Installation](docs/INSTALLATION.de.md) ·
-[Vorabversion 0.1.0b13](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b13) ·
+[Vorabversion 0.1.0b14](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b14) ·
 [Sicherung](docs/BACKUP.de.md) ·
 [English](#english)
 
@@ -41,6 +41,8 @@ Dein Inventar bleibt lokal in Home Assistant und auch ohne Geräteverknüpfung e
   können eigene Namen und Standorte haben.
 - **Das Inventar behalten:** Geräte ohne HA-Verknüpfung verwalten, archivieren und
   wiederherstellen. Wird ein HA-Gerät entfernt, bleiben Inventareintrag und Codes erhalten.
+  Nach dem erneuten Koppeln führt **Erneut verknüpfen** den gespeicherten Eintrag
+  und einen leeren Zweiteintrag zusammen.
 - **Daten übertragen und sichern:** JSON und CSV einschließlich Archiv exportieren,
   mit Vorschau importieren und Konflikte bewusst entscheiden. Die Inventardatei
   wird mit einer HA-Sicherung des Konfigurationsordners erfasst.
@@ -56,13 +58,13 @@ und seine Daten ist auf Home-Assistant-Administratoren beschränkt.
 
 Setup Code Manager ist eine **benutzerdefinierte Integration** für
 **Home Assistant 2026.11 oder neuer**. Installiere sie über den Marketplace oder
-kopiere sie manuell in `custom_components`. Aktuell ist **0.1.0b13 eine Vorabversion**;
+kopiere sie manuell in `custom_components`. Aktuell ist **0.1.0b14 eine Vorabversion**;
 das Projekt ist noch nicht im allgemeinen Marketplace-Katalog gelistet.
 
 1. **Einstellungen → Marketplace** öffnen und **Add from link** / **Über Link hinzufügen** wählen.
 2. `https://github.com/durkadigital/setup-code-manager` hinzufügen und GitHub verbinden,
    wenn Home Assistant dazu auffordert.
-3. In den Repository-Details **Vorabversionen** einschließen und **0.1.0b13** auswählen.
+3. In den Repository-Details **Vorabversionen** einschließen und **0.1.0b14** auswählen.
 4. Installieren und den Einrichtungsdialog abschließen. Bei einem Update den
    angeforderten Home-Assistant-Neustart ausführen.
 5. **Setup Code Manager** in der Seitenleiste öffnen.
@@ -138,18 +140,19 @@ choose fewer records or omit notes if it is exceeded.
 
 Link an entry to Home Assistant to keep its device name and area up to date.
 These fields are read-only while linked; notes remain editable. Removing an HA
-device keeps the inventory entry and its codes. Panel and API access require an
+device keeps the inventory entry and its codes. Use **Relink device** after pairing
+again to keep the original record and consolidate an empty duplicate. Panel and API access require an
 administrator account.
 
-**Install the current pre-release, 0.1.0b13:** In **HA 2026.11+**, open **Settings →
+**Install the current pre-release, 0.1.0b14:** In **HA 2026.11+**, open **Settings →
 Marketplace → Add from link**, add
 `https://github.com/durkadigital/setup-code-manager`, connect GitHub when prompted,
-enable **Pre-releases** in the repository details and select **0.1.0b13**. Install
+enable **Pre-releases** in the repository details and select **0.1.0b14**. Install
 and complete setup; restart HA when requested after an update. The project is
 currently available as a custom repository and is not listed in the general catalog.
 
 For manual installation, download the
-[release source ZIP](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b13),
+[release source ZIP](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0b14),
 copy `custom_components/setup_code_manager` to the same path in your HA configuration,
 restart and add the integration under **Settings → Devices & services**.
 Back up HA before testing.
