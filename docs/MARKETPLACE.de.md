@@ -108,13 +108,11 @@ Metadaten enthalten.
 [Quellen: Validierung](https://contributors.home-assistant.io/marketplace/reference/validation/),
 [Katalogworkflow](https://github.com/hacs/default/blob/master/.github/workflows/checks.yml).
 
-Nach erfolgreichen Actions ist ein **veröffentlichtes GitHub Release** erforderlich;
-ein Tag allein reicht nicht. Eine ausdrückliche Stable-only-Bedingung enthalten
-die geprüfte Vorlage und der Release-Check nicht: Der Check prüft lediglich,
-ob `/releases` Einträge liefert. Vorabversionen werden im Marketplace nur bei
-aktiviertem Vorabversionsschalter angeboten. Eine stabile Version vor breiter
-Veröffentlichung bleibt deshalb unsere Produktentscheidung und darf nicht als
-belegte formale Katalogregel ausgegeben werden.
+Nach erfolgreichen Actions ein **reguläres GitHub-Release ohne Vorabversionskennzeichnung**
+veröffentlichen. Das Review zu unserer Einreichung verlangt diese Fassung, damit
+Nutzer die Integration mit den Standardeinstellungen installieren können. Nach
+der Veröffentlichung den Release-Link im Einreichungs-PR teilen.
+[Review der Einreichung](https://github.com/hacs/default/pull/13839#pullrequestreview-5928452314).
 [Quellen: PR-Vorlage](https://github.com/hacs/default/blob/master/.github/PULL_REQUEST_TEMPLATE.md),
 [Release-Check](https://github.com/hacs/default/blob/master/scripts/check/releases.py),
 [Releases](https://contributors.home-assistant.io/marketplace/guides/releases/).
@@ -141,8 +139,6 @@ Quellen: [Einreichungsablauf](https://github.com/hacs/documentation/blob/main/so
 
 Vom Maintainer werden vor diesem externen PR noch benötigt:
 
-- Entscheidung, welcher getestete Stand eingereicht wird und ob vorher die erste
-  stabile Version erscheinen soll.
 - Ergebnisse der verbliebenen praktischen Abnahme, soweit sie als abgeschlossen
   beworben werden sollen.
 - Gewünschter privater Kontaktweg für Sicherheitsmeldungen, falls ergänzt.

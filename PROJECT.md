@@ -14,7 +14,7 @@ praktische Grenzen stehen in der [README](README.md).
 | Integrationsordner | `custom_components/setup_code_manager` |
 | Speicherdatei | `.storage/setup_code_manager` im HA-Konfigurationsordner |
 | Kontoeinstellungen | `.storage/setup_code_manager_preferences` im HA-Konfigurationsordner |
-| Aktuelle Vorabversion | `0.1.0b14` |
+| Aktuelle reguläre Version | `0.1.0` |
 | Mindestversion | Home Assistant `2026.11.0` |
 
 Grundlage ist [PhantomPhoton/Setup-Codes](https://github.com/PhantomPhoton/Setup-Codes),
@@ -25,7 +25,8 @@ Lizenzen stehen in [PROVENANCE.md](docs/PROVENANCE.md).
 
 ## Stand und Verteilung
 
-**0.1.0b14** verknüpft einen bestehenden Eintrag nach erneuter Kopplung mit dem
+**0.1.0** übernimmt den Funktionsumfang von Beta 14 und verknüpft einen
+bestehenden Eintrag nach erneuter Kopplung mit dem
 aktuellen HA-Gerät. Codes und Notizen bleiben beim ursprünglichen Eintrag.
 Ein leerer Zweiteintrag wird beim Speichern zusammengeführt. Stimmen Hersteller,
 Modell und Seriennummer eindeutig überein, markiert die Auswahl das Gerät als
@@ -49,9 +50,8 @@ Ansichten und Standard bleiben zentral pro HA-Konto gespeichert. Das Inventar-
 und JSON-/CSV-Austauschformat bleibt unverändert.
 Bedienung und Ausbauplan stehen in [USAGE](docs/USAGE.de.md) und
 [ROADMAP](docs/ROADMAP.de.md).
-Die Integration befindet sich weiterhin in der Betaphase. Eine Aufnahme in den
-allgemeinen Marketplace-Katalog ist noch nicht erfolgt; die Installation ist über
-ein benutzerdefiniertes Repository oder manuell möglich.
+Die Einreichung für den allgemeinen Marketplace-Katalog ist in Prüfung.
+Die Installation ist über ein benutzerdefiniertes Repository oder manuell möglich.
 
 **0.1.0b10** wurde auf HA Core **2026.11.1** installiert und Home Assistant
 anschließend neu gestartet. Alle 13 Einträge mit gespeichertem Code blieben
