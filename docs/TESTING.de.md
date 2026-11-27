@@ -12,6 +12,18 @@ reales QR-Foto lokal und die Fotoaufnahme auf dem Ziel-iPhone geprüft.
 Private Fotos und Codeinhalte werden nicht im Repository dokumentiert.
 Die vollständige praktische Abnahme steht aus.
 
+## Beta 0.2.0b1 am 27. November 2026
+
+534 Python-Tests und 276 JavaScript-Tests bestanden. Ruff bestätigte die Code-
+und Formatprüfungen. Der isolierte Lauf mit HA Core 2026.11.0 bestand alle 20
+Prüfungen, darunter der maskierte Inventarabruf, das gezielte Lesen eines Codes
+und das Laden der lokalen OCR- und Backup-Dateien über HTTP. Der Lauf meldete
+keinen Fehler der Integration.
+
+WebKit und Chromium wurden mit synthetischen Daten für Fotoerkennung, gezielten
+Codeabruf und Wiederherstellung geprüft. Die Prüfung auf dem physischen iPhone
+steht aus.
+
 ## Lokale Abschlussprüfung von 0.1.0b11 am 10. November 2026
 
 - **473 Python-Tests** und **250 JavaScript-Tests** bestanden.

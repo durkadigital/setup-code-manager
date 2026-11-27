@@ -1,5 +1,31 @@
 # Filtern, Ansichten und Codepflege
 
+## Geräteübersicht ab 0.2.0b1
+
+Tippe auf **Code fehlt**, um für genau dieses Gerät einen Code zu erfassen.
+Der Gerätename öffnet die Details. Bei gewähltem Protokoll führt der Status zur
+passenden Codekarte. Das Eingabefeld öffnet die Tastatur erst beim Antippen.
+Gespeicherte Ansichten kannst du direkt neben **Filter** auswählen.
+
+Nach dem Schließen eines Dialogs kannst du mit der Tastatur an derselben Stelle
+weiterarbeiten. Hast du auf dem Handy eine Aktion über das Dreipunktmenü
+aufgerufen, erhält dessen Schaltfläche den Fokus.
+
+Home Assistant durchsucht das Inventar und sendet die IDs der Treffer. Die
+Übersicht erhält Gerätedaten und Codestatus. Anzeigen, Kopieren und QR-Anzeige
+rufen einen einzelnen Code ab. Beim Bearbeiten lädt das Panel die Codes des
+gewählten Geräts. Wenn du die App wechselst, verdeckt das Panel sichtbare Codes
+und schließt eine offene QR-Anzeige.
+
+## Gedruckten Matter-Code erfassen
+
+Wähle **Foto aufnehmen** oder **Foto auswählen**. Erkennt das Panel im Bild keinen
+passenden QR-Code, liest es gedruckte Matter-Ziffern lokal. Vergleiche den
+Vorschlag mit dem Aufdruck und tippe auf die passende Zahl. Erst **Speichern**
+übernimmt sie ins Inventar. Ein lesbarer Matter-QR behält seinen vollständigen
+MT-Inhalt. Für Fotos genügt auch die lokale HTTP-Verbindung. Der direkte
+Kamerastream setzt einen sicheren Browserkontext voraus.
+
 ## Suche und Filter
 
 Die Suche berücksichtigt Gerätenamen, Räume, Hersteller, Modell, Seriennummer,

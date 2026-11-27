@@ -497,3 +497,75 @@ for (const [decision,acceptsCode] of [['keep-code',false],['replace-code',true]]
     }
   });
 }
+
+test('missing badge opens the selected record and returns focus after a rerender', async () => {
+  const {panel,state}=fixture();
+  const badge=panel.shadowRoot.querySelector('[data-action="add-missing"]');
+  await panel._onClick({target:badge});
+  assert.equal(panel._draft.id,badge.dataset.id);
+  assert.equal(panel._dirty,false);
+  assert.equal(state.focusCalls.some(editableFocus),false);
+  panel._renderMain();
+  await panel._onClick({target:action(panel,'close-modal')});
+  assert.equal(panel.shadowRoot.activeElement.dataset.action,'add-missing');
+  assert.equal(panel.shadowRoot.activeElement.dataset.id,badge.dataset.id);
+  panel._selecting=true; panel._renderMain();
+  assert.equal(panel.shadowRoot.querySelector('[data-action="add-missing"]'),null);
+});
+
+test('menu and desktop dialog chains restore the outer initiating button', async () => {
+  for (const desktop of [true,false]) {
+    const {panel}=fixture({desktop});
+    const root=desktop?'import':'menu';
+    await panel._onClick({target:action(panel,root)});
+    if (!desktop) await panel._onClick({target:panel.shadowRoot.querySelector('dialog [data-action="import"]')});
+    panel._renderMain();
+    panel._closeModal(true);
+    assert.equal(panel.shadowRoot.activeElement.dataset.action,root);
+  }
+});
+
+test('late reveal response after a background event never unmasks a code', async () => {
+  const {panel}=fixture();
+  panel._connected=true; panel._summaries=true;
+  const record=panel._devices[0]; record.codes=[{id:'sample',protocol:'matter',stored:true,has_qr:true,has_manual:true}];
+  panel._selectedId=record.id; panel._renderMain();
+  let complete;
+  panel._api=()=>new Promise(resolve=>{complete=resolve;});
+  const pending=panel._onClick({target:action(panel,'reveal')});
+  document.hidden=true;
+  try { panel._onVisibility(); }
+  finally { document.hidden=false; }
+  complete({code:{id:'sample',value:syntheticMatter,protocol:'matter'}});
+  await pending;
+  assert.equal(panel._shownCodes.size,0);
+  assert.equal(panel._revealed.size,0);
+  assert(!panel.shadowRoot.innerHTML.includes(syntheticMatter));
+});
+
+test('a changed filter lets the user reapply the same saved view from the toolbar', async () => {
+  const {panel}=fixture();
+  panel._viewsReady=true;
+  panel._savedViews=[{id:'home',name:'Home',settings:panel._viewSettings()}];
+  panel._applyView('home');
+  assert.equal(control(panel,'quick-view').value,'home');
+  panel._codeStatusFilter='missing'; panel._renderMain();
+  assert.equal(control(panel,'quick-view').value,'');
+  const quick=control(panel,'quick-view'); quick.value='home';
+  panel._onChange({target:quick});
+  assert.equal(panel._codeStatusFilter,'all');
+  assert.equal(control(panel,'quick-view').value,'home');
+});
+
+test('a missing Matter code remains actionable on a device that already has HomeKit', async () => {
+  const {panel}=fixture();
+  const record=panel._devices[0];
+  record.codes=[{id:'existing',protocol:'homekit',value:'03145154',label:''}];
+  panel._protocol='matter'; panel._codeStatusFilter='missing'; panel._renderMain();
+  const badge=panel.shadowRoot.querySelector(`button[data-action="add-missing"][data-id="${record.id}"]`);
+  assert.match(badge.getAttribute('aria-label'),/Matter/);
+  await panel._onClick({target:badge});
+  assert.equal(panel._draft.id,record.id);
+  assert.equal(panel._draft.codes[0].value,'03145154');
+  assert.equal(panel._draft.codes[1].protocol,'matter');
+});

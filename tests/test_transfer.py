@@ -158,86 +158,18 @@ def test_csv_rejects_unescaped_cell_and_conflicting_metadata(inventory_data):
     assert preview_import([], parsed)[0]["status"] == "invalid"
 
 
-def test_legacy_migration_is_deterministic_and_preserves_original():
-    old = {
-        "devices": [
-            {
-                "id": "old-1",
-                "protocol": "homekit",
-                "setup_code": "031-45-154",
-                "name": "Küchenlampe",
-                "manufacturer": None,
-                "model": "Modell",
-                "serial_number": "000123",
-                "notes": "Original\nNotiz",
-                "area_name": "Küche",
-                "ha_device_id": "ha-1",
-                "native_id": "native-1",
-                "area_id": "area-1",
-                "created_at": "2026-10-24T10:00:00+00:00",
-                "updated_at": None,
-            }
-        ]
-    }
-    before = deepcopy(old)
-    content = json.dumps({"version": 1, "minor_version": 1, "key": "setup_codes", "data": old})
-    first = parse_import("legacy", content, "home-a")
-    again = parse_import("legacy", content, "home-a")
-    assert old == before
-    assert first == again
-    assert first[0]["source_refs"] == [
-        "setup_codes:old-1",
-        "setup_codes:old-1:native_id=native-1",
-        "setup_codes:old-1:area_id=area-1",
-    ]
-    assert first[0]["codes"][0]["value"] == "03145154"
-    assert first[0]["location"] == "Küche"
-    assert first[0]["links"] == [{"ha_device_id": "ha-1"}]
-    assert preview_import(first, again)[0]["status"] == "unchanged"
+@pytest.mark.parametrize("format", ["legacy", "json"])
+@pytest.mark.parametrize(
+    "source", [{"devices": []}, {"key": "setup_codes", "version": 1, "data": {"devices": []}}]
+)
+def test_original_store_is_not_an_exchange_file(format, source):
+    with pytest.raises(ValueError):
+        parse_import(format, json.dumps(source), "home")
 
 
-def test_removed_legacy_record_is_unlinked_not_archived_and_invalid_code_is_visible():
-    data = {
-        "devices": [
-            {
-                "id": "old",
-                "name": "Removed",
-                "ha_device_id": "ha-1",
-                "status": "removed",
-                "setup_code": None,
-            },
-            {
-                "id": "bad",
-                "name": "Invalid",
-                "protocol": "matter",
-                "setup_code": "SECRET-BAD-CODE",
-            },
-        ]
-    }
-    parsed = parse_import("legacy", json.dumps(data), "home")
-    assert parsed[0]["links"] == []
-    assert parsed[0]["archived"] is False
-    assert parsed[0]["codes"] == []
-    rows = preview_import([], parsed)
-    assert rows[1]["status"] == "invalid"
-    assert "SECRET-BAD-CODE" not in json.dumps(rows)
-
-
-def test_duplicate_legacy_ids_do_not_create_two_records():
-    old = {"id": "old", "name": "Duplicate", "setup_code": None}
-    parsed = parse_import("legacy", json.dumps({"devices": [old, old]}), "home")
-    assert all(row["status"] == "invalid" for row in preview_import([], parsed))
-
-
-def test_invalid_storage_envelope_and_file_size_rejected(monkeypatch):
+def test_oversized_import_rejected(monkeypatch):
     from custom_components.setup_code_manager import transfer
 
-    with pytest.raises(ValueError, match="legacy"):
-        parse_import(
-            "legacy",
-            json.dumps({"version": 1, "key": "other", "data": {"devices": []}}),
-            "home",
-        )
     monkeypatch.setattr(transfer, "MAX_CONTENT_BYTES", 10)
     with pytest.raises(ValueError, match="limit"):
         parse_import("json", " " * 11, "home")

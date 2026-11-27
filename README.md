@@ -8,6 +8,7 @@ Dein Inventar bleibt lokal in Home Assistant und auch ohne Geräteverknüpfung e
 
 [Installation](docs/INSTALLATION.de.md) ·
 [Version 0.1.0](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0) ·
+[Beta 0.2.0b1](https://github.com/durkadigital/setup-code-manager/releases/tag/0.2.0b1) ·
 [Sicherung](docs/BACKUP.de.md) ·
 [English](#english)
 
@@ -54,17 +55,27 @@ zeigt das neue Dropdown mit Beispieldaten.
 Die Oberfläche ist auf Deutsch und Englisch verfügbar. Der Zugriff auf das Panel
 und seine Daten ist auf Home-Assistant-Administratoren beschränkt.
 
+## Neu in Beta 0.2.0b1
+
+Die Beta ergänzt **Code fehlt** als direkten Einstieg und bietet die
+gespeicherten Ansichten in der kompakten Übersicht an. Gedruckte Matter-Ziffern
+lassen sich aus einem Foto übernehmen. Die Suche läuft in Home Assistant,
+Codes werden gezielt angefordert. Für das Inventar gibt es zusätzlich einen
+passphraseschützten SCMB-Export mit Änderungsvorschau beim Wiederherstellen.
+[Bedienung](docs/USAGE.de.md) · [Backup und Wiederherstellung](docs/BACKUP.de.md)
+
 ## Installation
 
 Setup Code Manager ist eine **benutzerdefinierte Integration** für
 **Home Assistant 2026.11 oder neuer**. Installiere sie über den Marketplace oder
 kopiere sie manuell in `custom_components`. **0.1.0** ist die erste reguläre
-Version. Bis zur Katalogaufnahme ist die Integration über ihren Repository-Link verfügbar.
+Version. Der Marketplace bietet die Integration über ihren Repository-Link an.
 
 1. **Einstellungen → Marketplace** öffnen und **Add from link** / **Über Link hinzufügen** wählen.
 2. `https://github.com/durkadigital/setup-code-manager` hinzufügen und GitHub verbinden,
    wenn Home Assistant dazu auffordert.
-3. In den Repository-Details **0.1.0** auswählen.
+3. In den Repository-Details **0.1.0** auswählen. Zum Testen der Beta die
+   Vorabversionen einblenden und **0.2.0b1** wählen.
 4. Installieren und den Einrichtungsdialog abschließen. Bei einem Update den
    angeforderten Home-Assistant-Neustart ausführen.
 5. **Setup Code Manager** in der Seitenleiste öffnen.
@@ -77,7 +88,8 @@ Updates und Hinweise für bestehende HACS-Installationen stehen in der
 
 Die Livekamera benötigt **HTTPS und eine Kamerafreigabe**. Fotoauswahl und manuelle
 Eingabe stehen als Alternativen zur Verfügung; die Verfügbarkeit der System-Fotoaufnahme
-hängt von Browser und Companion-App ab. Gedruckte Ziffern werden nicht per OCR gelesen.
+hängt von Browser und Companion-App ab. Ab **0.2.0b1** erkennt die Fotoauswahl
+auch gedruckte manuelle Matter-Codes und bittet um Bestätigung.
 
 Unterstützt werden Matter-QRs (`MT:`), HomeKit-QRs (`X-HM://`), Z-Wave-SmartStart-QRs
 und die jeweiligen manuellen Codes. Pro Gerät wird ein Code je Protokoll gespeichert.
@@ -147,7 +159,8 @@ administrator account.
 **Install version 0.1.0:** In **HA 2026.11+**, open **Settings →
 Marketplace → Add from link**, add
 `https://github.com/durkadigital/setup-code-manager`, connect GitHub when prompted,
-and select **0.1.0** in the repository details. Install
+and select **0.1.0** in the repository details. To test **0.2.0b1**, show
+prereleases and select that version. Install
 and complete setup; restart HA when requested after an update. The project is
 currently available as a custom repository and is not listed in the general catalog.
 
@@ -158,9 +171,10 @@ restart and add the integration under **Settings → Devices & services**.
 Back up HA before testing.
 
 **Privacy and limits:** Decoding runs locally, and images are neither uploaded
-nor stored. Live video needs HTTPS and camera permission. There is no OCR, and
-each device can hold one code per protocol. The integration does not pair devices.
-Exports contain setup codes in plain text, and the inventory has no additional
+nor stored. Live video needs HTTPS and camera permission. In beta **0.2.0b1**,
+photos can also provide printed Matter digits for you to confirm. Each device can
+hold one code per protocol. JSON, CSV and PDF contain readable codes. The beta
+also supports passphrase-encrypted inventory backups. The inventory has no additional
 encryption beyond your HA environment. Include the configuration folder in HA
 backups; an inventory export does not replace a full HA backup. PDFs are readable
 copies of selected codes and cannot be imported as an inventory backup.

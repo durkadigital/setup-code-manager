@@ -208,6 +208,11 @@ async def test_nested_module_and_css_urls_change_when_only_a_translation_changes
             "i18n.js",
             "icons.js",
             "scanner.js",
+            "ocr.js",
+            "vendor/ocr",
+            "backup.js",
+            "backup-worker.js",
+            "backup-crypto.js",
             "qr.js",
             "vendor/jsQR.js",
         }

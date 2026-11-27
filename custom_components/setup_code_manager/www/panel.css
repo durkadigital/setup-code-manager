@@ -61,3 +61,47 @@
 @media (max-width: 800px) {
   .dialog-feedback { padding-inline: 20px; }
 }
+
+button.add-missing { font: inherit; cursor: pointer; border: 1px solid currentColor; min-height: 32px; }
+button.add-missing:hover { text-decoration: underline; }
+.quick-view { min-width: 0; }
+.search-row:has(.quick-view:not([hidden])) { grid-template-columns: minmax(140px,1fr) auto minmax(104px,190px) minmax(110px,190px); }
+.quick-view .filter-field span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+@media (max-width:800px) {
+  #inventory-caption[data-archive="false"] { display: none; }
+  .topbar { min-height: 48px; margin-bottom: 8px; padding-block: calc(4px + var(--safe-area-inset-top,env(safe-area-inset-top,0px))) 4px; }
+  .toolbar { margin-bottom: 4px; }
+  .tabs { margin-bottom: 8px; }
+  .filters { margin-bottom: 8px; }
+  .search-row,.search-row:has(.quick-view:not([hidden])) { gap: 6px; }
+  .search-row:has(.quick-view:not([hidden])) { grid-template-columns: auto minmax(0,1fr) minmax(0,1fr); }
+  .quick-view select,.search-row > .filter-field select { width: 100%; min-width: 0; text-overflow: ellipsis; }
+  .list-actions { margin-block: 2px; }
+  .device-table .add-missing { min-height: 44px; }
+}
+@media (max-width:360px) {
+  .search-row:has(.quick-view:not([hidden])) { grid-template-columns: 1fr 1fr; }
+  .search-row:has(.quick-view:not([hidden])) > .filter-field { grid-column: 1/-1; }
+}
+
+.backup-passwords { display: grid; gap: 12px; margin-block: 14px; }
+.backup-passwords input { width: 100%; min-height: 44px; font: inherit; font-size: 16px; }
+
+.search-row .filter-field { position: relative; }
+.search-row .filter-field select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-inline-end: 28px;
+}
+.search-row .filter-field::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset-inline-end: 12px;
+  top: calc(50% - 5px);
+  width: 7px;
+  height: 7px;
+  border: solid currentColor;
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}

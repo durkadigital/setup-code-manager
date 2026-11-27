@@ -188,6 +188,15 @@ async def smoke(directory: str, results: dict, evidence: RuntimeEvidence) -> Non
                     "preferences.js",
                     "pdf.js",
                     "scanner.js",
+                    "ocr.js",
+                    "vendor/ocr/worker.min.js",
+                    "vendor/ocr/tesseract-core-lstm.wasm.js",
+                    "vendor/ocr/eng.traineddata.gz",
+                    "backup.js",
+                    "backup-worker.js",
+                    "backup-crypto.js",
+                    "vendor/noble-ciphers/aes.js",
+                    "vendor/noble-hashes/pbkdf2.js",
                     "i18n.js",
                     "icons.js",
                     "vendor/jsQR.js",
@@ -323,7 +332,6 @@ async def smoke(directory: str, results: dict, evidence: RuntimeEvidence) -> Non
                         )
                         saved = await ws.receive_json()
                         assert saved["success"]
-                        assert saved["result"]["codes"][0]["value"] == "03145154"
                         await ws.send_json({"id": 3, "type": DOMAIN + "/export", "format": "json"})
                         exported = await ws.receive_json()
                         assert exported["success"]
@@ -454,6 +462,23 @@ async def smoke(directory: str, results: dict, evidence: RuntimeEvidence) -> Non
                         )
                         expected_preferences[user.id] = preferences_saved["result"]
                         results["checks"]["admin_views_account_persistence"] = True
+                        record_id = saved["result"]["id"]
+                        await ws.send_json({"id": 25, "type": DOMAIN + "/list"})
+                        summary = (await ws.receive_json())["result"]
+                        assert "03145154" not in json.dumps(summary)
+                        code = summary["devices"][0]["codes"][0]
+                        assert code["stored"] and "value" not in code
+                        await ws.send_json(
+                            {
+                                "id": 26,
+                                "type": DOMAIN + "/read_record",
+                                "record_id": record_id,
+                                "code_id": code["id"],
+                                "expected_revision": summary["revision"],
+                            }
+                        )
+                        assert (await ws.receive_json())["result"]["code"]["value"] == "03145154"
+                        results["checks"]["masked_inventory_and_targeted_read"] = True
             results["stage"] = "reload"
             assert await hass.config_entries.async_unload(entry.entry_id)
             assert DOMAIN not in hass.data

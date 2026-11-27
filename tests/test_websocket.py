@@ -19,6 +19,10 @@ from custom_components.setup_code_manager.manager import InventoryError, SetupCo
 SECRET = "SYNTHETIC_PRIVATE_SETUP_CODE_DO_NOT_LOG"
 COMMANDS = {
     "list": {},
+    "read_record": {"record_id": "record-1", "code_id": "code-1", "expected_revision": 7},
+    "search": {"query": SECRET},
+    "duplicates": {"record_id": "record-1", "codes": [{"protocol": "matter", "value": SECRET}]},
+    "preview_code": {"token": "token", "key": "row-1", "side": "existing", "code_id": "code-1"},
     "view_preferences": {},
     "save_view_preferences": {
         "preferences": {"views": [], "defaultViewId": ""},
@@ -131,6 +135,10 @@ async def invoke(hass, connection, name):
 def test_all_handlers_have_distinct_registered_types():
     handlers = [
         websocket_api.ws_list,
+        websocket_api.ws_read_record,
+        websocket_api.ws_search,
+        websocket_api.ws_duplicates,
+        websocket_api.ws_preview_code,
         websocket_api.ws_view_preferences,
         websocket_api.ws_save_view_preferences,
         websocket_api.ws_ha_devices,
@@ -159,6 +167,10 @@ async def test_admin_commands_schedule_and_respond_through_real_ha_decorators(ap
     assert conn.results[0][0] == 42
     expected = {
         "list": ("list_data", ()),
+        "read_record": ("read_record", ("record-1", 7, "code-1")),
+        "search": ("search", (SECRET,)),
+        "duplicates": ("duplicate_records", ("record-1", COMMANDS["duplicates"]["codes"])),
+        "preview_code": ("read_preview_code", ("token", "admin-1", "row-1", "existing", "code-1")),
         "view_preferences": ("async_get_view_preferences", ("admin-1",)),
         "save_view_preferences": (
             "async_save_view_preferences",
@@ -176,7 +188,8 @@ async def test_admin_commands_schedule_and_respond_through_real_ha_decorators(ap
         "import": ("async_import", ("preview-1", 7, {"record-1": "add"}, "admin-1")),
     }
     method_name, args = expected[name]
-    getattr(manager, method_name).assert_called_once_with(*args)
+    kwargs = {"protect_hidden": True} if name == "save" else {}
+    getattr(manager, method_name).assert_called_once_with(*args, **kwargs)
     if name.startswith("async_") or method_name.startswith("async_"):
         getattr(manager, method_name).assert_awaited_once()
     if name in ("archive", "delete"):
@@ -325,6 +338,7 @@ async def test_revision_schema_rejects_coercion_and_boolean_aliases(api, name, r
     [
         ("export", {"format": "xml"}),
         ("preview_import", {"content": 123}),
+        ("preview_import", {"format": "legacy"}),
         ("save", {"record": []}),
         ("delete", {"record_id": 123}),
         ("archive", {"archived": "yes"}),
@@ -338,6 +352,13 @@ async def test_command_schemas_reject_wrong_shapes(api, name, overrides):
     hass, _, _ = api
     with pytest.raises(probatio.Invalid):
         command(hass, name, **overrides)
+
+
+async def test_import_preview_requires_file_content(api):
+    hass, _, _ = api
+    _, schema = hass.data[ha_websocket.DOMAIN][f"{DOMAIN}/preview_import"]
+    with pytest.raises(probatio.Invalid):
+        schema({"id": 42, "type": f"{DOMAIN}/preview_import", "format": "json"})
 
 
 @pytest.mark.parametrize(
@@ -354,6 +375,10 @@ async def test_errors_are_sanitized_before_ha_exception_handler(api, caplog, nam
     hass, manager, connection = api
     method = {
         "list": "list_data",
+        "read_record": "read_record",
+        "search": "search",
+        "duplicates": "duplicate_records",
+        "preview_code": "read_preview_code",
         "view_preferences": "async_get_view_preferences",
         "save_view_preferences": "async_save_view_preferences",
         "ha_devices": "ha_devices",

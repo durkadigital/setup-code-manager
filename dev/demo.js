@@ -1,5 +1,6 @@
 /** Explicitly synthetic, memory-only API for exercising the production panel. */
 import '../custom_components/setup_code_manager/www/panel.js';
+import { filterRecords } from '../custom_components/setup_code_manager/www/filters.js';
 import { normalizeViewPreferences } from '../custom_components/setup_code_manager/www/preferences.js';
 const copy = value => JSON.parse(JSON.stringify(value));
 const now = () => new Date().toISOString();
@@ -127,12 +128,53 @@ const parseCSV = content => {
   return [...result.values()];
 };
 const canonical = data => JSON.stringify(Object.fromEntries([...fields,'codes'].filter(key => !['created_at','updated_at'].includes(key)).map(key => [key,data[key]])));
-const legacy = () => [copy(initial[0]),copy(initial[2]),{...copy(initial[4]),codes:[code('c-5','zwave','23456-23456-34567-45678-56789-01234-02345-03456')]},record('legacy-1','Leselampe Bett','Schlafzimmer','IKEA','KAJPLATS',[code('lc-1','matter',MATTER)]),record('legacy-2','Türsensor Keller','Keller','Aeotec','Sensor',[code('lc-2','zwave',DSK)]),record('legacy-3','Tischleuchte','Büro','Nanoleaf','Essentials',[code('lc-3','homekit',HOMEKIT)])];
+function summaryRecord(record) {
+  if (!record) return null;
+  const codes = record.codes.map(({id,protocol,label,value,manual_value})=>({
+    id,protocol,label,stored:!!value,has_manual:!!manual_value,has_qr:/^(MT:|X-HM:\/\/|90\d{30,})/.test(value),
+  }));
+  return {...copy(record),codes};
+}
+function previewRow(row) {
+  if (row.status === 'invalid') return {...row,existing:null,incoming:null,code_changes:[],changed_fields:[]};
+  const before = new Map((row.existing?.codes || []).map(code=>[code.protocol,code]));
+  const after = new Map(row.incoming.codes.map(code=>[code.protocol,code]));
+  const code_changes = [];
+  for (const protocol of new Set([...before.keys(),...after.keys()])) {
+    const old = before.get(protocol), next = after.get(protocol);
+    let kind;
+    if (!next) kind = 'removed';
+    else if (!old) kind = 'added';
+    else if (old.value !== next.value) kind = 'replaced';
+    else if (old.label !== next.label) kind = 'description';
+    if (kind) code_changes.push({protocol,kind});
+  }
+  const changed_fields = row.status !== 'conflict' ? [] : ['name','location','manufacturer','model','serial_number','notes','archived','links']
+    .filter(field=>JSON.stringify(row.existing[field])!==JSON.stringify(row.incoming[field]));
+  return {...row,existing:summaryRecord(row.existing),incoming:summaryRecord(row.incoming),code_changes,changed_fields};
+}
 async function callWS(message) {
   // Inventory examples remain in memory; the panel may remember view settings separately.
   await new Promise(resolve => setTimeout(resolve,120));
   const command = message.type.replace('setup_code_manager/','');
-  if(command === 'list') return {devices:decorated(devices),revision,instance_id:INSTANCE,legacy_available:true,view_preferences:copy(demoViews)};
+  if (command === 'list') return {
+    code_access:'on_demand', devices:decorated(devices).map(summaryRecord),
+    revision, instance_id:INSTANCE, view_preferences:copy(demoViews),
+  };
+  if(command === 'read_record') {
+    ensureRevision(message.expected_revision);
+    const record=decorated(devices).find(item=>item.id===message.record_id);
+    if(!record) failure('not_found');
+    if(!message.code_id) return {record};
+    const code=record.codes.find(item=>item.id===message.code_id);
+    if(!code) failure('not_found');
+    return {code};
+  }
+  if(command === 'search') {
+    const all=decorated(devices);
+    return {revision,record_ids:['all','archive'].flatMap(tab=>filterRecords(all,{tab,query:message.query}).map(item=>item.id))};
+  }
+  if(command === 'duplicates') return devices.filter(item=>item.id!==message.record_id && item.codes.some(code=>message.codes.some(candidate=>candidate.protocol===code.protocol && candidate.value===code.value))).map(({id,name})=>({id,name}));
   if(command === 'view_preferences') return copy(demoViews);
   if(command === 'save_view_preferences') {
     if(message.expected_revision !== demoViews.revision) failure('preferences_conflict');
@@ -187,13 +229,35 @@ async function callWS(message) {
     return {filename:`setup-code-manager-${selected ? 'selected-' : ''}DEMO.${message.format}`,mime:message.format === 'csv' ? 'text/csv;charset=utf-8' : 'application/json',count:records.length,scope:selected ? 'selected' : 'all',content:message.format === 'csv' ? exportCSV(records) : JSON.stringify({format:'setup-code-manager',schema_version:1,instance_id:INSTANCE,revision,devices:records},null,2)};
   }
   if(command === 'preview_import') {
+    if (!['json', 'csv'].includes(message.format) || typeof message.content !== 'string') {
+      failure('validation_error');
+    }
     let incoming;
-    if(message.format === 'legacy') incoming=legacy();
-    else if(message.format === 'csv') incoming=parseCSV(message.content);
-    else {let envelope;try{envelope=JSON.parse(message.content);}catch{failure('validation_error');}if(envelope.format !== 'setup-code-manager' || envelope.schema_version !== 1 || !Array.isArray(envelope.devices)) failure('validation_error');incoming=envelope.devices.map(item=>({...item,links:envelope.instance_id === INSTANCE ? item.links : []}));}
+    if (message.format === 'csv') {
+      incoming = parseCSV(message.content);
+    } else {
+      let envelope;
+      try { envelope = JSON.parse(message.content); }
+      catch { failure('validation_error'); }
+      if (envelope?.format !== 'setup-code-manager' || envelope.schema_version !== 1 || !Array.isArray(envelope.devices)) {
+        failure('validation_error');
+      }
+      incoming = envelope.devices.map(item => ({
+        ...item, links: envelope.instance_id === INSTANCE ? item.links : []
+      }));
+    }
     const token=crypto.randomUUID();
     const rows=incoming.map((item,index)=>{const existing=devices.find(record=>record.id === item.id);const valid=!!item.id && !!item.name && Array.isArray(item.codes);return {key:String(index),id:item.id,name:item.name,status:!valid ? 'invalid' : !existing ? 'new' : canonical(item) === canonical(existing) ? 'unchanged' : 'conflict',existing:existing ? copy(existing) : undefined,incoming:copy(item)};});
-    const preview={token,revision,rows,counts:{}};previews.set(token,preview);return copy(preview);
+    const preview={token,revision,rows,counts:{}};previews.set(token,preview);return {...preview,rows:rows.map(previewRow)};
+  }
+  if (command === 'preview_code') {
+    const preview=previews.get(message.token);
+    if (!preview || preview.revision!==revision) failure('preview_expired');
+    const row=preview.rows.find(item=>item.key===message.key);
+    const record=['existing','incoming'].includes(message.side) && row?.[message.side];
+    const code=record?.codes?.find(item=>item.id===message.code_id);
+    if (!code) failure('not_found');
+    return {value:code.value};
   }
   if(command === 'import') {
     ensureRevision(message.expected_revision);const preview=previews.get(message.token);if(!preview || preview.revision !== revision) failure('conflict');

@@ -15,13 +15,11 @@ Sentinels must never be persisted. Preview rows omit their raw contents.
 from __future__ import annotations
 
 import csv
-import hashlib
 import io
 import json
 from collections import Counter
 from copy import deepcopy
 from typing import Any
-from uuid import NAMESPACE_URL, uuid5
 
 from .inventory import MAX_RECORDS, TEXT_LIMITS, _identifier, validate_record
 
@@ -193,12 +191,7 @@ def _export_csv(data: dict[str, Any]) -> str:
 
 
 def parse_import(format: str, content: str, instance_id: str) -> list[dict[str, Any]]:
-    """Parse records for preview, never writing data or matching by name/code.
-
-    JSON/CSV from a different instance lose HA links. ``legacy`` means a local
-    original Setup Codes file and retains links for the caller to revalidate.
-    For an uploaded legacy file, the caller must clear links before applying it.
-    """
+    """Preview a Manager export, retaining HA links only for the same instance."""
     _identifier(instance_id, "instance ID")
     if not isinstance(content, str):
         raise ValueError("Import content must be UTF-8 text.")
@@ -211,13 +204,11 @@ def parse_import(format: str, content: str, instance_id: str) -> list[dict[str, 
     content = content.removeprefix("\ufeff")
     if format == "csv":
         return _parse_csv(content, instance_id)
-    if format not in ("json", "legacy"):
-        raise ValueError("Supported import formats are json, csv and legacy.")
+    if format != "json":
+        raise ValueError("Supported import formats are json and csv.")
     data = _json_load(content)
     if not isinstance(data, dict):
         raise ValueError("Import must contain a JSON object.")
-    if format == "legacy":
-        return _parse_legacy(data)
     if set(data) != _ENVELOPE_FIELDS:
         raise ValueError("Invalid JSON backup fields.")
     if (
@@ -311,87 +302,52 @@ def _parse_csv(content: str, instance_id: str) -> list[dict[str, Any]]:
     return _validated_import(records, preserve_links=source == instance_id)
 
 
-def _parse_legacy(data: dict[str, Any]) -> list[dict[str, Any]]:
-    if "data" in data:
-        if (
-            data.get("key") != "setup_codes"
-            or type(data.get("version")) is not int
-            or data["version"] != 1
-        ):
-            raise ValueError("Unsupported legacy storage key or version.")
-        data = data["data"]
-    if not isinstance(data, dict) or set(data) != {"devices"}:
-        raise ValueError("Expected original Setup Codes storage data.")
-    records = []
-    for index, raw in enumerate(_records(data["devices"])):
-        try:
-            if not isinstance(raw, dict):
-                raise ValueError("Invalid legacy record.")
-            legacy_id = raw.get("id")
-            if legacy_id is not None:
-                legacy_id = _identifier(legacy_id, "legacy record ID")
-            else:
-                legacy_id = hashlib.sha256(
-                    json.dumps(raw, sort_keys=True, ensure_ascii=False).encode()
-                ).hexdigest()
-            source_ref = f"setup_codes:{legacy_id}"
-            record_id = uuid5(NAMESPACE_URL, f"setup-code-manager:{source_ref}").hex
-            record: dict[str, Any] = {
-                "id": record_id,
-                "name": raw.get("name") or "Gerät",
-                "archived": False,
-                "codes": [],
-                "links": [],
-                "source_refs": [source_ref],
-                "created_at": raw.get("created_at") or "",
-                "updated_at": raw.get("updated_at") or "",
-            }
-            # Keep historical identifiers as provenance only. Include the
-            # original record ID so equal area/native IDs never become a shared
-            # reference that could accidentally merge two imported devices.
-            for field in ("native_id", "area_id"):
-                original = raw.get(field)
-                if original is not None and original != "":
-                    if not isinstance(original, str):
-                        raise ValueError("Invalid legacy identifier metadata.")
-                    record["source_refs"].append(f"{source_ref}:{field}={original}")
-            for field in TEXT_LIMITS:
-                if field != "name":
-                    record[field] = raw.get(field) if raw.get(field) is not None else ""
-            # The original file can contain a historical area name, but an area
-            # ID is an instance-local identifier, not a human-readable location.
-            if not record["location"] and raw.get("area_name"):
-                record["location"] = raw["area_name"]
-            code = raw.get("setup_code")
-            if code is not None and code != "":
-                record["codes"] = [
-                    {
-                        "id": uuid5(NAMESPACE_URL, f"{source_ref}:code").hex,
-                        "protocol": raw.get("protocol"),
-                        "value": code,
-                        "label": "",
-                    }
-                ]
-            ha_id = raw.get("ha_device_id")
-            if (
-                ha_id
-                and raw.get("status") != "removed"
-                and raw.get("in_home_assistant") is not False
-            ):
-                record["links"] = [{"ha_device_id": ha_id}]
-            # Validate here so invalid legacy values remain visible in preview.
-            records.append(validate_record(record))
-        except (ValueError, TypeError) as err:
-            message = str(err) if isinstance(err, ValueError) else "Invalid legacy record data."
-            records.append(_invalid(raw, message, index))
-    return _validated_import(records, preserve_links=True)
-
-
 def _comparison(record: dict[str, Any]) -> dict[str, Any]:
     result = deepcopy(record)
     result["codes"] = sorted(result["codes"], key=lambda code: code["id"])
     result["links"] = sorted(result["links"], key=lambda link: link["ha_device_id"])
     result["source_refs"] = sorted(result["source_refs"])
+    return result
+
+
+def preview_summary(row: dict[str, Any]) -> dict[str, Any]:
+    """Describe what applying a row would change; never expose pairing values."""
+    result = deepcopy(row)
+    old, new = row["existing"] or {}, row["incoming"] or {}
+    changes = []
+    before = {c["protocol"]: c for c in old.get("codes", [])}
+    after = {c["protocol"]: c for c in new.get("codes", [])}
+    for protocol in sorted(before.keys() | after.keys()):
+        if protocol not in after:
+            kind = "removed"
+        elif protocol not in before:
+            kind = "added"
+        elif before[protocol]["value"] != after[protocol]["value"]:
+            kind = "replaced"
+        elif before[protocol]["label"] != after[protocol]["label"]:
+            kind = "description"
+        else:
+            continue
+        changes.append({"protocol": protocol, "kind": kind})
+    result["code_changes"] = changes
+    result["changed_fields"] = [
+        field
+        for field in (
+            "name",
+            "location",
+            "manufacturer",
+            "model",
+            "serial_number",
+            "notes",
+            "archived",
+            "links",
+        )
+        if row["status"] == "conflict" and old.get(field) != new.get(field)
+    ]
+    for side in ("existing", "incoming"):
+        if result[side]:
+            for code in result[side]["codes"]:
+                code["stored"] = bool(code.pop("value"))
     return result
 
 

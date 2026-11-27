@@ -61,6 +61,31 @@ Home-Assistant-Sicherung. Lokale Einstellungen zur Wiedererkennung gelöschter
 HA-Geräte werden nur mit der HA-Konfiguration gesichert, nicht mit dem
 portablen Listenexport.
 
+## Verschlüsseltes Inventar ab 0.2.0b1
+
+1. Unter **Exportieren** den Umfang wählen. **Verschlüsseltes Backup** erzeugt
+   für alle, gefilterte oder markierte Einträge eine Datei mit der Endung `.scmb`.
+2. Eine Passphrase mit mindestens 12 Zeichen eingeben und bestätigen. Die
+   Wiederherstellung braucht diese Passphrase.
+3. Zum Einlesen **Importieren → Datei auswählen** öffnen, die SCMB-Datei wählen
+   und die Passphrase eingeben. Die Vorschau zeigt pro Gerät und Protokoll,
+   welche Codes hinzukommen, ersetzt oder entfernt werden. Ein Konflikt bleibt
+   zunächst auf **Vorhandenen Eintrag behalten**. Unter **Vergleichen** lassen
+   sich die beiden Codes einzeln einblenden.
+
+Der Browser verschlüsselt den gewählten JSON-Export vor dem Download und prüft
+eine eingelesene Datei vor der Importvorschau. Die Passphrase bleibt auf dem
+Gerät. Inventardaten werden über die eingestellte Home-Assistant-Verbindung
+übertragen. Für die Übertragung mit TLS eine HTTPS-Adresse verwenden.
+
+Das binäre Dateiformat v1 beginnt mit den vier ASCII-Bytes `SCMB` und dem
+Versionsbyte 1. Es folgen die PBKDF2-Iterationszahl als 32-Bit-Ganzzahl in
+Big-Endian (600.000), 16 zufällige Salt-Bytes und eine zufällige 12-Byte-Nonce.
+PBKDF2-HMAC-SHA-256 leitet aus der UTF-8-Passphrase in Unicode-NFC einen
+256-Bit-Schlüssel ab. AES-GCM authentifiziert den gesamten 37-Byte-Header als
+Zusatzdaten. Auf den Chiffretext folgt ein 16-Byte-Tag. Die Größenbegrenzung für
+den entschlüsselten JSON-Inhalt beträgt 16 MiB.
+
 ## Zwei Wiederherstellungswege
 
 1. **Gesamtes Home Assistant wiederherstellen:** Die HA-Konfiguration einschließlich
@@ -69,7 +94,7 @@ portablen Listenexport.
    und Standardansicht im ursprünglichen HA-Konto prüfen. Die installierte
    Integration muss die gespeicherte Datenversion unterstützen.
 2. **Frisches Home Assistant, nur Inventar übernehmen:** Setup Code Manager
-   installieren und JSON oder CSV importieren. Bei einer abweichenden
+   installieren und den Inventarexport importieren. Bei einer abweichenden
    Installationskennung werden alte HA-Verknüpfungen entfernt; Geräte und Codes
    bleiben erhalten. Anschließend passende Geräte neu zuordnen. Ein Listenimport
    stellt weder Matter-Kopplungen noch Automationen, die alte Geräte-Registry oder
@@ -78,9 +103,8 @@ portablen Listenexport.
 
 Der Import zeigt neue, unveränderte, widersprüchliche und ungültige Einträge vor
 der Übernahme. Wiederholte unveränderte Importe erzeugen keine Dubletten.
-Vorhandene Daten werden nicht ungefragt ersetzt. Die lokale Migration aus
-`.storage/setup_codes` liest die Originaldatei ausschließlich; diese bleibt als
-Ausgangsstand erhalten.
+Zum Ersetzen eines vorhandenen Eintrags bestätigst du den Konflikt in der Vorschau.
+Verwende dafür eine von Setup Code Manager exportierte Inventardatei.
 
 ## Abnahme vor einem produktiven Einsatz
 

@@ -8,7 +8,6 @@ import logging
 from collections import Counter
 from copy import deepcopy
 from datetime import UTC, datetime
-from pathlib import Path
 from time import monotonic
 from typing import Any
 from uuid import uuid4
@@ -23,6 +22,7 @@ from homeassistant.helpers.debounce import Debouncer
 from .const import EVENT_UPDATED, REFRESH_COOLDOWN
 from .device_pdf import MAX_PDF_BYTES, MAX_PDF_RECORDS, DevicePDFError, build_device_pdf
 from .inventory import MAX_RECORDS, RECORD_FIELDS, _identifier, new_record, validate_record
+from .matter_code import manual_pairing_code_from_mt
 from .preferences import (
     MAX_REVISION,
     ViewPreferencesStore,
@@ -37,9 +37,10 @@ from .status import (
     device_protocols,
     linked_identity,
     serialize_record,
+    summary_record,
 )
 from .store import SetupCodesStore
-from .transfer import MAX_CONTENT_BYTES, ImportIssue, export_data, parse_import, preview_import
+from .transfer import ImportIssue, export_data, parse_import, preview_import, preview_summary
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -100,8 +101,6 @@ class SetupCodesManager:
         self._unsubs: list[Any] = []
         self._debouncer: Debouncer | None = None
         self._previews: dict[str, dict[str, Any]] = {}
-        self.legacy_path = Path(hass.config.path(".storage", "setup_codes"))
-        self.legacy_available = False
 
     async def async_setup(self) -> None:
         await self.store.async_load()
@@ -112,7 +111,6 @@ class SetupCodesManager:
             # be overwritten with an empty set of views. Keep the error local.
             self._view_preferences_error = True
             _LOGGER.warning("Saved view preferences are unavailable; inventory remains accessible")
-        self.legacy_available = await self.hass.async_add_executor_job(self.legacy_path.is_file)
         await self.async_sync()
         self._debouncer = Debouncer(
             self.hass, _LOGGER, cooldown=REFRESH_COOLDOWN, immediate=False, function=self.async_sync
@@ -158,7 +156,7 @@ class SetupCodesManager:
     def _check_revision(self, expected_revision: int) -> None:
         if self._closing:
             raise InventoryError("not_loaded")
-        if type(expected_revision) is not int or expected_revision != self.store.data["revision"]:
+        if type(expected_revision) is not int or expected_revision != self.store.revision:
             raise InventoryError("conflict")
 
     async def _commit(self, data: dict[str, Any]) -> None:
@@ -181,9 +179,69 @@ class SetupCodesManager:
         return {
             "instance_id": data["instance_id"],
             "revision": data["revision"],
-            "legacy_available": self.legacy_available,
-            "devices": [serialize_record(self.hass, r) for r in data["devices"]],
+            "code_access": "on_demand",
+            "devices": [summary_record(self.hass, r) for r in data["devices"]],
         }
+
+    def read_record(self, record_id: str, revision: int, code_id: str | None) -> dict:
+        self._check_revision(revision)
+        raw = self.store.get(record_id)
+        if not raw:
+            raise InventoryError("not_found")
+        record = serialize_record(self.hass, raw)
+        if code_id is None:
+            return {"record": record}
+        for code in record["codes"]:
+            if code["id"] == code_id:
+                return {"code": code}
+        raise InventoryError("not_found")
+
+    def search(self, query: str) -> dict:
+        def numeric(text: str) -> str:
+            stripped = "".join(text.split()).replace("-", "")
+            return stripped if stripped.isascii() and stripped.isdigit() else ""
+
+        term = query.strip().casefold()
+        number = numeric(term)
+        found = []
+        registry = dr.async_get(self.hass)
+        for record in self.store.devices:
+            identity = linked_identity(self.hass, record["links"]) or {}
+            fields = [
+                identity.get(key, record[key])
+                for key in ("name", "location", "manufacturer", "model", "serial_number", "notes")
+            ]
+            for link in record["links"]:
+                if device := registry.async_get(link["ha_device_id"]):
+                    fields.append(device_identity(self.hass, device)["location"])
+            numbers = []
+            for code in record["codes"]:
+                value = code["value"]
+                fields.extend((code["label"], value))
+                numbers.append(value)
+                if code["protocol"] == "matter" and value.startswith("MT:"):
+                    manual = manual_pairing_code_from_mt(value) or ""
+                    fields.append(manual)
+                    numbers.append(manual)
+            if any(term in value.casefold() for value in fields) or (
+                number and any(number in numeric(value) for value in numbers)
+            ):
+                found.append(record["id"])
+        return {"record_ids": found, "revision": self.store.revision}
+
+    def duplicate_records(self, record_id: str, codes: list[dict]) -> list[dict]:
+        values = {(code["protocol"], code["value"]) for code in codes}
+        return [
+            {
+                "id": record["id"],
+                "name": (linked_identity(self.hass, record["links"]) or {}).get(
+                    "name", record["name"]
+                ),
+            }
+            for record in self.store.devices
+            if record["id"] != record_id
+            and any((c["protocol"], c["value"]) in values for c in record["codes"])
+        ]
 
     def _check_preferences_available(self) -> None:
         if self._closing:
@@ -351,7 +409,9 @@ class SetupCodesManager:
             ):
                 raise InventoryError("duplicate_link")
 
-    async def async_save(self, raw: dict[str, Any], expected_revision: int) -> dict[str, Any]:
+    async def async_save(
+        self, raw: dict[str, Any], expected_revision: int, *, protect_hidden: bool = False
+    ) -> dict[str, Any]:
         async with self._lock:
             self._check_revision(expected_revision)
             data = self.store.data
@@ -395,6 +455,10 @@ class SetupCodesManager:
                     "invalid_code" if "code" in str(err).lower() else "validation_error"
                 ) from err
             if existing:
+                if protect_hidden and not {c["id"] for c in existing["codes"]}.issubset(
+                    c["id"] for c in record["codes"]
+                ):
+                    raise InventoryError("reload_panel")
                 record["created_at"] = existing["created_at"]
                 # Archives are changed only through the explicit archive action.
                 record["archived"] = existing["archived"]
@@ -579,13 +643,8 @@ class SetupCodesManager:
                 "count": len(snapshot),
             }
 
-    def _read_legacy(self) -> str:
-        if self.legacy_path.stat().st_size > MAX_CONTENT_BYTES:
-            raise ValueError("Legacy file too large")
-        return self.legacy_path.read_text(encoding="utf-8")
-
     def _prepare_links(
-        self, incoming: list[dict[str, Any]], current: list[dict[str, Any]], *, legacy: bool
+        self, incoming: list[dict[str, Any]], current: list[dict[str, Any]]
     ) -> dict[str, str]:
         """Keep uncertain imports separate and unlinked, never infer from names."""
         reasons = {}
@@ -594,24 +653,6 @@ class SetupCodesManager:
         for record in incoming:
             if isinstance(record, ImportIssue):
                 continue
-            if legacy:
-                source_match = next(
-                    (r for r in current if set(r["source_refs"]) & set(record["source_refs"])), None
-                )
-                if source_match:
-                    record["id"] = source_match["id"]
-                    record["created_at"] = source_match["created_at"]
-                elif len(record["links"]) == 1:
-                    ha_id = record["links"][0]["ha_device_id"]
-                    owner = owners.get(ha_id)
-                    if (
-                        owner
-                        and not owner["codes"]
-                        and not owner["archived"]
-                        and counts[ha_id] == 1
-                    ):
-                        record["id"] = owner["id"]
-                        record["created_at"] = owner["created_at"]
             kept = []
             for link in record["links"]:
                 ha_id = link["ha_device_id"]
@@ -631,18 +672,13 @@ class SetupCodesManager:
         return reasons
 
     async def async_preview_import(self, format: str, content: str, owner: str) -> dict[str, Any]:
-        if format == "legacy":
-            try:
-                content = await self.hass.async_add_executor_job(self._read_legacy)
-            except (OSError, ValueError, UnicodeError) as err:
-                raise InventoryError("invalid_import") from err
         async with self._lock:
             if self._closing:
                 raise InventoryError("not_loaded")
             data = self.store.data
             try:
                 incoming = parse_import(format, content, data["instance_id"])
-                reasons = self._prepare_links(incoming, data["devices"], legacy=format == "legacy")
+                reasons = self._prepare_links(incoming, data["devices"])
                 for record in data["devices"]:
                     record.update(linked_identity(self.hass, record["links"]) or {})
                 rows = preview_import(data["devices"], incoming)
@@ -664,9 +700,21 @@ class SetupCodesManager:
             return {
                 "token": token,
                 "revision": data["revision"],
-                "rows": rows,
+                "rows": [preview_summary(row) for row in rows],
                 "counts": dict(Counter(row["status"] for row in rows)),
             }
+
+    def read_preview_code(self, token: str, owner: str, key: str, side: str, code_id: str) -> dict:
+        preview = self._previews.get(token)
+        if not preview or preview["owner"] != owner or preview["expires"] <= monotonic():
+            raise InventoryError("preview_expired")
+        self._check_revision(preview["revision"])
+        for row in preview["rows"]:
+            if row["key"] == key and side in ("existing", "incoming") and row[side]:
+                for code in row[side]["codes"]:
+                    if code["id"] == code_id:
+                        return {"value": code["value"]}
+        raise InventoryError("not_found")
 
     async def async_import(
         self, token: str, expected_revision: int, decisions: dict[str, str], owner: str

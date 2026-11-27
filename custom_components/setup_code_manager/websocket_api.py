@@ -70,6 +70,31 @@ async def ws_list(manager, connection, msg):
     return result
 
 
+@_endpoint(
+    "read_record", {vol.Required("record_id"): str, vol.Optional("code_id"): str, **_REVISION}
+)
+async def ws_read_record(manager, connection, msg):
+    return manager.read_record(msg["record_id"], msg["expected_revision"], msg.get("code_id"))
+
+
+@_endpoint("search", {vol.Required("query"): vol.All(str, vol.Length(min=1, max=1024))})
+async def ws_search(manager, connection, msg):
+    return manager.search(msg["query"])
+
+
+@_endpoint(
+    "duplicates",
+    {
+        vol.Required("record_id"): str,
+        vol.Required("codes"): vol.All(
+            [{vol.Required("protocol"): str, vol.Required("value"): str}], vol.Length(max=3)
+        ),
+    },
+)
+async def ws_duplicates(manager, connection, msg):
+    return manager.duplicate_records(msg["record_id"], msg["codes"])
+
+
 @_endpoint("view_preferences")
 async def ws_view_preferences(manager, connection, msg):
     return await manager.async_get_view_preferences(connection.user.id)
@@ -93,9 +118,12 @@ async def ws_sync(manager, connection, msg):
     return manager.list_data()
 
 
-@_endpoint("save", {vol.Required("record"): dict, **_REVISION})
+@_endpoint("save", {vol.Required("record"): dict, vol.Optional("codes_loaded"): bool, **_REVISION})
 async def ws_save(manager, connection, msg):
-    return await manager.async_save(msg["record"], msg["expected_revision"])
+    result = await manager.async_save(
+        msg["record"], msg["expected_revision"], protect_hidden=not msg.get("codes_loaded", False)
+    )
+    return {"id": result["id"]}
 
 
 @_endpoint(
@@ -103,9 +131,10 @@ async def ws_save(manager, connection, msg):
     {vol.Required("record_id"): str, vol.Required("ha_device_id"): str, **_REVISION},
 )
 async def ws_relink(manager, connection, msg):
-    return await manager.async_relink(
+    result = await manager.async_relink(
         msg["record_id"], msg["ha_device_id"], msg["expected_revision"]
     )
+    return {key: value for key, value in result.items() if key != "codes"}
 
 
 @_endpoint("delete", {vol.Required("record_id"): str, **_REVISION})
@@ -143,12 +172,27 @@ async def ws_pdf(manager, connection, msg):
 @_endpoint(
     "preview_import",
     {
-        vol.Required("format"): vol.In(("json", "csv", "legacy")),
-        vol.Optional("content", default=""): str,
+        vol.Required("format"): vol.In(("json", "csv")),
+        vol.Required("content"): str,
     },
 )
 async def ws_preview_import(manager, connection, msg):
     return await manager.async_preview_import(msg["format"], msg["content"], connection.user.id)
+
+
+@_endpoint(
+    "preview_code",
+    {
+        vol.Required("token"): str,
+        vol.Required("key"): str,
+        vol.Required("side"): vol.In(("existing", "incoming")),
+        vol.Required("code_id"): str,
+    },
+)
+async def ws_preview_code(manager, connection, msg):
+    return manager.read_preview_code(
+        msg["token"], connection.user.id, msg["key"], msg["side"], msg["code_id"]
+    )
 
 
 @_endpoint(
@@ -169,6 +213,9 @@ async def ws_import(manager, connection, msg):
 def async_register(hass: HomeAssistant) -> None:
     for command in (
         ws_list,
+        ws_read_record,
+        ws_search,
+        ws_duplicates,
         ws_view_preferences,
         ws_save_view_preferences,
         ws_ha_devices,
@@ -180,6 +227,7 @@ def async_register(hass: HomeAssistant) -> None:
         ws_export,
         ws_pdf,
         ws_preview_import,
+        ws_preview_code,
         ws_import,
     ):
         websocket_api.async_register_command(hass, command)

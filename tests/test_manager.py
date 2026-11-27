@@ -5,6 +5,7 @@ import base64
 import io
 import json
 from copy import deepcopy
+from pathlib import Path
 from threading import Event
 from types import MappingProxyType
 from unittest.mock import patch
@@ -404,7 +405,11 @@ async def test_removed_ha_device_preserves_codes_and_user_metadata(manager):
     assert saved["name"] == "Mein Gerät"
     assert saved["location"] == "Wohnzimmer"
     assert saved["notes"] == "Bleibt erhalten"
-    assert saved["codes"][0]["value"] == "34970112332"
+    assert saved["codes"][0]["stored"] and "value" not in saved["codes"][0]
+    assert (
+        manager.read_record(saved["id"], revision(manager), "code")["code"]["value"]
+        == "34970112332"
+    )
     assert not saved["archived"]
 
 
@@ -431,7 +436,8 @@ async def test_relink_replaces_empty_discovery_record_and_keeps_saved_codes(mana
 
     result = await manager.async_relink(original["id"], new.id, revision(manager))
     await manager.async_sync()
-    assert manager.list_data()["devices"] == [result]
+    assert [r["id"] for r in manager.list_data()["devices"]] == [result["id"]]
+    assert manager.read_record(result["id"], revision(manager), None)["record"] == result
     assert result["id"] == original["id"]
     assert result["created_at"] == original["created_at"]
     assert result["codes"] == original["codes"]
@@ -609,68 +615,70 @@ async def test_import_fails_on_registry_removal_after_preview(manager):
     assert manager.store.devices == []
 
 
-async def test_legacy_reuses_empty_record_and_is_idempotent(manager):
-    device = add_device(manager)
-    await manager.async_sync()
-    original_id = manager.store.devices[0]["id"]
-    legacy = {
-        "devices": [
-            {
-                "id": "old",
-                "name": "Old record",
-                "protocol": "matter",
-                "ha_device_id": device.id,
-                "setup_code": "34970112332",
-            }
-        ]
-    }
-    raw = json.dumps(legacy)
-    manager.legacy_path.write_text(raw)
-    preview = await manager.async_preview_import("legacy", "", "admin")
-    row = preview["rows"][0]
-    assert row["id"] == original_id and row["status"] == "conflict"
-    await manager.async_import(
-        preview["token"], preview["revision"], {row["key"]: "replace"}, "admin"
-    )
-    again = await manager.async_preview_import("legacy", "", "admin")
-    assert again["counts"] == {"unchanged": 1}
-    assert len(manager.store.devices) == 1
-    assert manager.legacy_path.read_text() == raw
+async def test_restart_and_import_do_not_access_the_original_integrations_store(
+    manager, tmp_path, monkeypatch
+):
+    inventory = manager.store.data
+    inventory["devices"] = [
+        new_record(
+            "Previously imported device",
+            source_refs=["setup_codes:old-1"],
+            archived=True,
+            notes="Saved before the update",
+            codes=[{"protocol": "homekit", "value": "03145154"}],
+        )
+    ]
+    await manager.store.async_commit(inventory)
+    await manager.async_shutdown()
+    foreign = tmp_path / ".storage" / "setup_codes"
+    foreign.write_text('{"key":"setup_codes","version":1,"data":{"devices":[]}}')
+
+    def guard(method):
+        def checked(path, *args, **kwargs):
+            assert path != foreign, f"Unexpected {method.__name__} on the original store"
+            return method(path, *args, **kwargs)
+
+        return checked
+
+    for name in ("stat", "is_file", "open"):
+        monkeypatch.setattr(Path, name, guard(getattr(Path, name)))
+
+    reloaded = SetupCodesManager(manager.hass, SetupCodesStore(manager.hass))
+    try:
+        await reloaded.async_setup()
+        assert "legacy_available" not in reloaded.list_data()
+        with pytest.raises(InventoryError, match="invalid_import"):
+            await reloaded.async_preview_import("legacy", "", "admin")
+        for format in ("json", "csv"):
+            content = export_data(format, inventory)
+            preview = await reloaded.async_preview_import(format, content, "admin")
+            assert preview["counts"] == {"unchanged": 1}
+        assert reloaded.store.data == inventory
+    finally:
+        await reloaded.async_shutdown()
 
 
-async def test_multi_protocol_legacy_keeps_records_without_ambiguous_links(manager):
-    device = add_device(manager)
-    await manager.async_sync()
-    legacy = {
-        "devices": [
-            {
-                "id": "old-one",
-                "name": "Matter",
-                "protocol": "matter",
-                "ha_device_id": device.id,
-                "setup_code": "34970112332",
-            },
-            {
-                "id": "old-two",
-                "name": "HomeKit",
-                "protocol": "homekit",
-                "ha_device_id": device.id,
-                "setup_code": "03145154",
-            },
-        ]
-    }
-    manager.legacy_path.write_text(json.dumps(legacy))
-    preview = await manager.async_preview_import("legacy", "", "admin")
+@pytest.mark.parametrize("format", ["json", "csv"])
+async def test_file_import_keeps_records_separate_when_their_ha_link_is_ambiguous(manager, format):
+    device = add_device(manager, protocols=("fixture_other_integration",))
+    links = [{"ha_device_id": device.id}]
+    records = [
+        new_record("Matter", links=links, codes=[{"protocol": "matter", "value": "34970112332"}]),
+        new_record("HomeKit", links=links, codes=[{"protocol": "homekit", "value": "03145154"}]),
+    ]
+    content = export_data(format, {**manager.store.data, "devices": records})
+    preview = await manager.async_preview_import(format, content, "admin")
     assert preview["counts"] == {"new": 2}
-    assert all(
-        r["incoming"]["links"] == [] and r["reason"] == "link_not_restored" for r in preview["rows"]
-    )
+    assert all(row["reason"] == "link_not_restored" for row in preview["rows"])
     await manager.async_import(
-        preview["token"], preview["revision"], {r["key"]: "add" for r in preview["rows"]}, "admin"
+        preview["token"],
+        preview["revision"],
+        {row["key"]: "add" for row in preview["rows"]},
+        "admin",
     )
-    again = await manager.async_preview_import("legacy", "", "admin")
+    assert manager.store.devices == [{**record, "links": []} for record in records]
+    again = await manager.async_preview_import(format, content, "admin")
     assert again["counts"] == {"unchanged": 2}
-    assert sum(len(r["codes"]) for r in manager.store.devices) == 2
 
 
 async def test_active_selection_removed_before_save_requires_explicit_unlink(manager):
@@ -731,7 +739,13 @@ async def test_matter_qr_manual_value_is_only_runtime_data(manager, qr, manual):
     saved = await manager.async_save(raw, revision(manager))
     assert saved["codes"][0]["manual_value"] == manual
     assert saved["codes"][0]["value"] == qr
-    assert manager.list_data()["devices"][0]["codes"][0] == saved["codes"][0]
+    summary = manager.list_data()["devices"][0]["codes"][0]
+    assert summary["has_manual"] and summary["has_qr"] and summary["stored"]
+    assert "value" not in summary and "manual_value" not in summary
+    assert (
+        manager.read_record(saved["id"], revision(manager), summary["id"])["code"]
+        == saved["codes"][0]
+    )
     assert raw == original
     assert manager.store.devices[0]["codes"] == original["codes"]
     persisted = json.loads(manager.store.path.read_text())
@@ -753,13 +767,25 @@ async def test_matter_manual_value_survives_archive_and_ha_device_removal(manage
     await manager.async_archive(saved["id"], True, revision(manager))
     archived = manager.list_data()["devices"][0]
     assert archived["archived"] and archived["linked"]
-    assert archived["codes"][0]["manual_value"] == "34970112332"
+    assert archived["codes"][0]["has_manual"]
+    assert (
+        manager.read_record(saved["id"], revision(manager), None)["record"]["codes"][0][
+            "manual_value"
+        ]
+        == "34970112332"
+    )
     dr.async_get(manager.hass).async_remove_device(device.id)
     await manager.async_sync()
     disconnected = manager.list_data()["devices"][0]
     assert disconnected["archived"] and not disconnected["linked"]
     assert disconnected["links"][0]["active"] is False
-    assert disconnected["codes"][0]["manual_value"] == "34970112332"
+    assert disconnected["codes"][0]["has_manual"]
+    assert (
+        manager.read_record(saved["id"], revision(manager), None)["record"]["codes"][0][
+            "manual_value"
+        ]
+        == "34970112332"
+    )
     assert manager.store.devices[0]["codes"] == record["codes"]
 
 
@@ -945,41 +971,23 @@ async def test_unlinked_manual_identity_survives_sync_archive_and_unlink(manager
     assert manager.store.get(linked["id"])["notes"] == "Keep note"
 
 
-@pytest.mark.parametrize("format", ["json", "csv", "legacy"])
+@pytest.mark.parametrize("format", ["json", "csv"])
 async def test_import_linked_identity_matches_ha_and_reimport_is_unchanged(manager, format):
     device = add_device(manager, protocols=("fixture_other_integration",))
     area = ar.async_get(manager.hass).async_create("HA room")
     dr.async_get(manager.hass).async_update_device(
         device.id, name_by_user="HA name", area_id=area.id
     )
-    if format == "legacy":
-        content = json.dumps(
-            {
-                "devices": [
-                    {
-                        "id": "legacy-identity",
-                        "name": "File name",
-                        "location": "File room",
-                        "notes": "Imported note",
-                        "ha_device_id": device.id,
-                        "protocol": "matter",
-                        "setup_code": "34970112332",
-                    }
-                ]
-            }
+    data = manager.store.data
+    data["devices"] = [
+        new_record(
+            "File name",
+            location="File room",
+            notes="Imported note",
+            links=[{"ha_device_id": device.id}],
         )
-        manager.legacy_path.write_text(content)
-    else:
-        data = manager.store.data
-        data["devices"] = [
-            new_record(
-                "File name",
-                location="File room",
-                notes="Imported note",
-                links=[{"ha_device_id": device.id}],
-            )
-        ]
-        content = export_data(format, data)
+    ]
+    content = export_data(format, data)
     preview = await manager.async_preview_import(format, content, "admin")
     row = preview["rows"][0]
     assert (row["incoming"]["name"], row["incoming"]["location"]) == ("HA name", "HA room")
@@ -1147,3 +1155,66 @@ async def test_organization_registry_events_refresh_clients_without_persisting_m
         await manager.hass.async_block_till_done()
     assert schedule.call_count == 3
     assert manager.store.data == before
+
+
+async def test_private_inventory_search_and_single_record_reads(manager):
+    raw = matter_record()
+    raw.update(notes="Lesen am Fenster", location="Kinderzimmer", serial_number="SYNTH-15")
+    saved = await manager.async_save(raw, revision(manager))
+    second = await manager.async_save(new_record("Unrelated"), revision(manager))
+    current = revision(manager)
+    listing = json.dumps(manager.list_data())
+    assert MATTER_QR not in listing and "34970112332" not in listing
+    for query in ("LESEN", "kinderzim", "Synth-15", "3497-011", MATTER_QR.lower()):
+        assert manager.search(query) == {"record_ids": [saved["id"]], "revision": current}
+    assert manager.search("MT:NOT-A-MATCH")["record_ids"] == []
+    assert manager.read_record(saved["id"], current, "matter-code")["code"]["value"] == MATTER_QR
+    with pytest.raises(InventoryError, match="not_found"):
+        manager.read_record(second["id"], current, "matter-code")
+    with pytest.raises(InventoryError, match="conflict"):
+        manager.read_record(saved["id"], current - 1, None)
+    matches = manager.duplicate_records(second["id"], [{"protocol": "matter", "value": MATTER_QR}])
+    assert matches == [{"id": saved["id"], "name": saved["name"]}]
+    assert manager.duplicate_records(saved["id"], raw["codes"]) == []
+
+
+async def test_stale_panel_cannot_save_away_hidden_codes(manager):
+    saved = await manager.async_save(matter_record(), revision(manager))
+    partial = manager.store.get(saved["id"])
+    partial["notes"] = "New"
+    partial["codes"] = []
+    before = manager.store.data
+    with pytest.raises(InventoryError, match="reload_panel"):
+        await manager.async_save(partial, revision(manager), protect_hidden=True)
+    assert manager.store.data == before
+    await manager.async_save(partial, revision(manager), protect_hidden=False)
+    assert manager.store.get(saved["id"])["codes"] == []
+
+
+async def test_restore_preview_only_discloses_one_code_to_its_owner(manager):
+    saved = await manager.async_save(matter_record(), revision(manager))
+    source = manager.store.data
+    source["devices"][0]["notes"] = "Changed"
+    source["devices"][0]["codes"][0]["value"] = "34970112332"
+    source["devices"][0]["codes"].append(
+        {"id": "hk", "protocol": "homekit", "value": "03145154", "label": ""}
+    )
+    preview = await manager.async_preview_import("json", export_data("json", source), "owner")
+    row = preview["rows"][0]
+    assert row["changed_fields"] == ["notes"]
+    assert row["code_changes"] == [
+        {"protocol": "homekit", "kind": "added"},
+        {"protocol": "matter", "kind": "replaced"},
+    ]
+    for value in (MATTER_QR, "34970112332", "03145154"):
+        assert value not in json.dumps(preview)
+    args = row["key"], "existing", "matter-code"
+    with pytest.raises(InventoryError, match="preview_expired"):
+        manager.read_preview_code(preview["token"], "other", *args)
+    assert manager.read_preview_code(preview["token"], "owner", *args) == {"value": MATTER_QR}
+    await manager.async_archive(saved["id"], True, revision(manager))
+    with pytest.raises(InventoryError, match="conflict"):
+        manager.read_preview_code(preview["token"], "owner", *args)
+    source["devices"][0]["codes"] = []
+    another = await manager.async_preview_import("json", export_data("json", source), "owner")
+    assert another["rows"][0]["code_changes"] == [{"protocol": "matter", "kind": "removed"}]

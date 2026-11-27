@@ -15,6 +15,7 @@ praktische Grenzen stehen in der [README](README.md).
 | Speicherdatei | `.storage/setup_code_manager` im HA-Konfigurationsordner |
 | Kontoeinstellungen | `.storage/setup_code_manager_preferences` im HA-Konfigurationsordner |
 | Aktuelle reguläre Version | `0.1.0` |
+| Aktuelle Beta | `0.2.0b1` |
 | Mindestversion | Home Assistant `2026.11.0` |
 
 Grundlage ist [PhantomPhoton/Setup-Codes](https://github.com/PhantomPhoton/Setup-Codes),
@@ -24,6 +25,13 @@ eigene API-, Panel- und Speicherkennungen. Details zu Herkunft und Drittanbieter
 Lizenzen stehen in [PROVENANCE.md](docs/PROVENANCE.md).
 
 ## Stand und Verteilung
+
+**0.2.0b1** ergänzt die kompakte mobile Übersicht, den direkten Einstieg über
+„Code fehlt“ und die Fokusrückgabe beim Schließen. Fotos können gedruckte
+Matter-Ziffern liefern. Codes werden gezielt abgerufen. Verschlüsselte
+Inventarsicherungen lassen sich mit einer Änderungsvorschau wiederherstellen.
+Die automatische Prüfung und der Import aus dem Speicher der ursprünglichen
+Integration entfallen. [Versionshinweise](docs/releases/0.2.0b1.md)
 
 **0.1.0** übernimmt den Funktionsumfang von Beta 14 und verknüpft einen
 bestehenden Eintrag nach erneuter Kopplung mit dem
@@ -50,7 +58,7 @@ Ansichten und Standard bleiben zentral pro HA-Konto gespeichert. Das Inventar-
 und JSON-/CSV-Austauschformat bleibt unverändert.
 Bedienung und Ausbauplan stehen in [USAGE](docs/USAGE.de.md) und
 [ROADMAP](docs/ROADMAP.de.md).
-Die Einreichung für den allgemeinen Marketplace-Katalog ist in Prüfung.
+HACS hat die [Einreichung für den allgemeinen Katalog](https://github.com/hacs/default/pull/13839#issuecomment-7142781275) am 24. November 2026 geschlossen.
 Die Installation ist über ein benutzerdefiniertes Repository oder manuell möglich.
 
 **0.1.0b10** wurde auf HA Core **2026.11.1** installiert und Home Assistant
@@ -128,7 +136,7 @@ Einzelheiten und Grenzen stehen im [Teststand](docs/TESTING.de.md).
 
 ## Weitere Unterlagen
 
-- [Installation, Updates und optionale Datenübernahme](docs/INSTALLATION.de.md)
+- [Installation, Updates und bestehendes Inventar](docs/INSTALLATION.de.md)
 - [Sicherung und Wiederherstellung](docs/BACKUP.de.md)
 - [Prüfungen und offene praktische Abnahme](docs/TESTING.de.md)
 - [Funktions- und Datenkonzept](docs/CONCEPT.de.md)

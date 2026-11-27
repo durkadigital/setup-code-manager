@@ -1,6 +1,7 @@
 # Setup Code Manager — Funktions- und Datenkonzept
 
-Stand: 7. November 2026. Vorschlag zur Durchsicht; noch nicht implementiert.
+Ursprünglicher Entwurf vom 7. November 2026. Der Abschnitt zum Import berücksichtigt
+die Beschränkung auf Manager-Exporte ab 0.2.0b1.
 
 Die visuelle Gestaltungsrichtung wurde bestätigt. Ergänzung vom 7. November 2026:
 Beim Erfassen soll eine gezielte Auswahl von HA-Geräten ohne passenden gespeicherten
@@ -18,7 +19,7 @@ Die erste Version umfasst:
 - Bestehende Eingabe, Prüfung und QR-Anzeige für HomeKit und Z-Wave erhalten.
 - Einträge bearbeiten, verknüpfen, archivieren und ausdrücklich löschen.
 - JSON-Sicherungen und CSV-Tabellen exportieren und kontrolliert importieren.
-- Originaldaten aus Setup Codes übernehmen und reguläre HA-Backups unterstützen.
+- Reguläre HA-Backups mit dem Inventar unterstützen.
 - Deutsche und englische Bedienoberfläche; HA-Farben, Hell-/Dunkelmodus und mobile Nutzung.
 
 Nicht im ersten Umfang: automatische Gerätekopplung, OCR gedruckter Ziffern,
@@ -152,18 +153,14 @@ Die bestätigte Auswahl wird als ein konsistenter Schreibvorgang übernommen.
 Bei Speicherfehlern entsteht keine teilweise importierte Liste. Vor der Übernahme
 wird geprüft, ob sich seit der Vorschau betroffene Einträge geändert haben.
 
-## Neuinstallation und Übernahme aus dem Original
+## Neuinstallation
 
 Beim Import in eine neue HA-Installation bleiben Einträge zunächst unabhängig.
 Alte Geräte-IDs werden nicht blind als gültige Verknüpfungen behandelt. Wiedererkennung
 liefert Vorschläge; unsichere Zuordnungen bestätigt der Nutzer.
 
-Für die Übernahme liest ein eigener Migrationsdialog `.storage/setup_codes`
-ausschließlich lesend und zeigt die Einträge in einer Vorschau. Das Original und
-seine Daten bleiben bestehen. Quellsystem und Original-ID ermöglichen wiederholbare
-Übernahme ohne Dubletten. Bei mehreren Quellen kommt der Installationsbezug hinzu.
-„Removed“ bedeutet „Nicht verknüpft“, nicht „Archiviert“. Codefreie Einträge bleiben
-auswählbar. Mehrere Originalzeilen eines physischen Geräts werden nicht ungefragt verschmolzen.
+Für den Umzug wählt der Nutzer einen JSON- oder CSV-Export des Managers aus.
+Bei früher übernommenen Einträgen gehören Herkunftsreferenzen zum eigenen Inventar.
 
 ## Speicherung, Zugriff und Backup
 
@@ -176,7 +173,7 @@ Panel und sämtliche Datenoperationen bleiben auf HA-Administratoren beschränkt
 Codes gehören weder in Logs/Diagnosedaten noch in das Git-Repository. Die Übersicht
 zeigt zunächst „Code gespeichert“; vollständige Codes sind bewusst in den Details
 abrufbar. CSV und unverschlüsseltes JSON enthalten lesbare Codes und werden beim
-Export entsprechend bezeichnet. Anwendungseigene Verschlüsselung wird nicht behauptet.
+Export entsprechend bezeichnet. Die Arbeitsversion bietet für portable Inventardateien zusätzlich authentifizierte Verschlüsselung im Browser.
 
 HA-Backups mit Konfiguration sollen den Store einschließen. Vor Release wird eine
 echte Sicherung und Wiederherstellung geprüft. Falls Schreibvorgänge verzögert werden,
@@ -184,11 +181,11 @@ müssen sie vor dem Backup abgeschlossen werden. Browserdaten sind kein dauerhaf
 
 ## Umsetzung nach Konzeptabstimmung
 
-1. Eigenständige Kennung, Titel, Metadaten und Datenmigration vorbereiten.
+1. Eigenständige Kennung, Titel, Metadaten und Inventarspeicher vorbereiten.
 2. Inventarmodell, unabhängige Einträge, Verknüpfungen und Archiv umsetzen.
 3. Mobile Details und Matter-Scanner einschließlich Bild-Fallback ergänzen.
 4. Versionierte JSON-/CSV-Formate, Vorschau und Import ergänzen.
-5. Originalmigration, Berechtigungen, Backup/Restore und Browser testen.
+5. Import von Manager-Exporten, Berechtigungen, Backup/Restore und Browser testen.
 6. Dokumentierte Testversion über eigene Repository-Adresse veröffentlichen.
 7. Nach stabiler Version Katalogaufnahme beantragen.
 
@@ -208,7 +205,7 @@ müssen sie vor dem Backup abgeschlossen werden. Browserdaten sind kein dauerhaf
 - JSON zweimal importieren: keine Dubletten; abweichende Inhalte benötigen Entscheidung.
 - Führende Nullen, Umlaute, Kommas, Zeilenumbrüche und Formelfelder über Export/Import prüfen.
 - Beschädigte Datei, neuere Formatversion und parallele Änderung: keine stillen Teilimporte.
-- Originaldaten zweimal übernehmen: keine Dubletten und unveränderte Quelldatei.
+- Bereits übernommene Einträge samt Herkunftsreferenzen nach dem Update prüfen.
 - Frisches HA: Daten nutzbar, alte Zuordnungen nicht blind übernommen.
 - Vollständiger HA-Restore: aktive/archivierte Einträge, Codes und Verknüpfungen prüfen.
 - Nicht-Administrator: Zugriff auch über direkte API-Aufrufe abgewiesen.

@@ -21,17 +21,15 @@ preserved in [UPSTREAM_README.md](UPSTREAM_README.md). The bundled QR encoder
 credits Project Nayuki and Anthony Fu; its license notices must remain.
 
 The integration uses `custom_components/setup_code_manager`,
-its own domain, sidebar panel, WebSocket command prefix and storage key. The
-original `.storage/setup_codes` file is read only when the user requests a
-migration preview. The original integration can remain installed during that
-comparison; the two inventories are independent after import.
+its own domain, sidebar panel, WebSocket command prefix and storage key.
+The two integrations keep separate inventories. The import accepts files
+exported by Setup Code Manager in JSON or CSV. The development version also opens encrypted SCMB inventory files locally. Records migrated by earlier
+versions retain their IDs and source references in the Manager inventory.
 
-Published beta releases are available from the [release page](https://github.com/durkadigital/setup-code-manager/releases).
-The project is installable as a custom repository; general Marketplace catalog
-submission has not yet been made. Installation, camera and backup/restore
-verification are documented separately in [TESTING.de.md](TESTING.de.md).
-The former migration banner and its UI action were removed in 0.1.0b6. The backend
-compatibility path and the original source data remain unchanged.
+Releases are available from the [release page](https://github.com/durkadigital/setup-code-manager/releases).
+The project is installable as a custom repository. HACS closed the
+[default catalog submission](https://github.com/hacs/default/pull/13839#issuecomment-7142781275).
+Installation, camera and backup/restore checks are documented in [TESTING.de.md](TESTING.de.md).
 
 The local scanner additionally bundles jsqr@1.4.0 under Apache-2.0, with the
 complete license, npm origin and SHA-256 checksums in
@@ -66,3 +64,12 @@ download helper do not replace the MIT and Apache-2.0 notices above.
 
 This is a technical collision check of those sources, not trademark clearance
 or a claim that every unlisted custom integration has been searched.
+
+
+## Local OCR and backup libraries
+
+The development version bundles the Tesseract.js recognition worker, a
+WebAssembly core and an English trained model for printed Matter codes. It uses
+Noble cryptography modules for backup processing where the browser does not
+expose Web Crypto. Versions and licenses are tracked with the local assets.
+[Bundled sources and notices](../custom_components/setup_code_manager/www/vendor/README.md)

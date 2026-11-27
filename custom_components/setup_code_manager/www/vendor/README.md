@@ -33,3 +33,38 @@ When updating, verify the npm integrity and upstream license again, replace the
 bundle and license together, update these hashes, and run `node --test
 tests/scanner.test.mjs` from the repository root. The tests rasterize QR symbols
 using the separately bundled encoder and decode their actual RGBA pixels.
+
+## Offline text recognition
+
+The bundled Tesseract.js 6.0.1 browser worker and tesseract.js-core 6.0.0
+LSTM-only, non-SIMD WebAssembly core use Apache-2.0. Their licenses and
+the worker's dependency notices are in `ocr/`. The quantized English
+trained model comes from `@tesseract.js-data/eng@1.0.0`
+(`4.0.0_best_int/eng.traineddata.gz`). The Tesseract trained models are
+released under Apache-2.0. The npm package archives were verified against
+their SHA-512 registry integrity before extracting these files. The panel
+starts one local worker only if photo QR detection fails for Matter.
+
+## Portable backup on local HTTP
+
+Web Crypto handles key derivation and authenticated encryption in secure
+contexts. For local HTTP, the backup worker can import the original ESM code
+and MIT licenses from `@noble/hashes@2.0.1` (PBKDF2-HMAC-SHA256) and
+`@noble/ciphers@2.1.1` (AES-GCM). Only the dependency trees of
+`pbkdf2.js`, `sha2.js` and `aes.js` are bundled. The npm package integrity
+was checked before extraction. The same binary backup is readable by either
+implementation.
+
+Upstream source and licensing information is available from
+[Tesseract.js](https://github.com/naptha/tesseract.js),
+[the Tesseract language data](https://github.com/tesseract-ocr/tessdata_best/blob/main/LICENSE),
+[noble-hashes](https://github.com/paulmillr/noble-hashes) and
+[noble-ciphers](https://github.com/paulmillr/noble-ciphers).
+
+| npm archive | SHA-512 integrity (Base64) |
+| --- | --- |
+| tesseract.js 6.0.1 | /sPvMvrCtgxnNRCjbTYbr7BRu0yfWDsMZQ2a/T5aN/L1t8wUQN6tTWv6p6FwzpoEBA0jrN2UD2SX4QQFRdoDbA== |
+| tesseract.js-core 6.0.0 | 1Qncm/9oKM7xgrQXZXNB+NRh19qiXGhxlrR8EwFbK5SaUbPZnS5OMtP/ghtqfd23hsr1ZvZbZjeuAGcMxd/ooA== |
+| @tesseract.js-data/eng 1.0.0 | mbTumm6KQPUHyzTPQaF3ObXYnx0SqqfV2nabqFVQBwD6Kl7PhGSLSzOlfFTWy0P3BjghaSKA2W9GB19Jk+ZcTg== |
+| @noble/ciphers 2.1.1 | bysYuiVfhxNJuldNXlFEitTVdNnYUc+XNJZd7Qm2a5j1vZHgY+fazadNFWFaMK/2vye0JVlxV3gHmC0WDfAOQw== |
+| @noble/hashes 2.0.1 | XlOlEbQcE9fmuXxrVTXCTlG2nlRXa9Rj3rr5Ue/+tX+nmkgbX720YHh0VR3hBF9xDvwnb8D2shVGOwNx+ulArw== |

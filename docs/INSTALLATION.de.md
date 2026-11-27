@@ -4,8 +4,8 @@ Setup Code Manager ist eine **benutzerdefinierte Integration** für Home Assista
 Sie liegt im Ordner `custom_components/setup_code_manager` und wird unter
 **Geräte & Dienste** eingerichtet.
 
-Die aktuelle reguläre Version ist **0.1.0**. Bis zur Aufnahme in den allgemeinen
-Marketplace-Katalog fügst du das Repository über seinen Link hinzu.
+Die aktuelle reguläre Version ist **0.1.0**, die neue Beta ist **0.2.0b1**.
+Für beide fügst du das benutzerdefinierte Repository über seinen Link hinzu.
 Lege vor einer Testinstallation oder einem Update eine aktuelle
 HA-Sicherung einschließlich Konfigurationsordner an.
 
@@ -28,7 +28,8 @@ Repository wird eine GitHub-Verbindung benötigt.
    `https://github.com/durkadigital/setup-code-manager`.
 3. Die von Home Assistant angeforderte GitHub-Verbindung abschließen.
 4. Die Repository-Details öffnen.
-5. **Setup Code Manager**, Version **0.1.0**, prüfen und installieren.
+5. **Setup Code Manager**, Version **0.1.0**, prüfen und installieren. Für die
+   Beta die Vorabversionen einblenden und **0.2.0b1** wählen.
    Die Integrationskennung lautet **`setup_code_manager`**.
 6. Den anschließenden Einrichtungsdialog abschließen und die gewünschten
    Geräteintegrationen wählen. Sollte kein Dialog erscheinen, unter
@@ -58,11 +59,10 @@ separates HACS muss auf HA 2026.11 nicht nachinstalliert werden.
 
 ## Manuell installieren
 
-1. Die [Release-Seite von 0.1.0](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0)
-   öffnen und **Source code (zip)** herunterladen.
-2. Das Archiv entpacken. In
-   `custom_components/setup_code_manager/manifest.json` muss die Version
-   **`0.1.0`** stehen.
+1. Die Release-Seite der gewünschten Version öffnen und **Source code (zip)**
+   herunterladen. [Stabil 0.1.0](https://github.com/durkadigital/setup-code-manager/releases/tag/0.1.0) · [Beta 0.2.0b1](https://github.com/durkadigital/setup-code-manager/releases/tag/0.2.0b1)
+2. Das Archiv entpacken und die gewählte Versionsnummer in
+   `custom_components/setup_code_manager/manifest.json` prüfen.
 3. Den vollständigen Ordner `custom_components/setup_code_manager` nach
    `<HA-Konfiguration>/custom_components/setup_code_manager` kopieren.
 4. Home Assistant neu starten und die Integration unter **Geräte & Dienste** hinzufügen.
@@ -81,11 +81,9 @@ Der [Teststand](TESTING.de.md) nennt bereits geprüfte und noch offene Fälle.
 
 ## Bestehende Daten
 
-Die ursprüngliche Integration `setup_codes` und Setup Code Manager
-`setup_code_manager` besitzen getrennte Inventare. Die ursprünglichen Ordner und
-`.storage/setup_codes` werden durch diese Installation nicht ersetzt oder gelöscht.
-Seit 0.1.0b6 enthält die Oberfläche keinen Hinweis oder Button zur Übernahme der
-Originaldaten mehr. Bestehende Einträge in Setup Code Manager bleiben erhalten.
+Setup Code Manager speichert sein Inventar in `.storage/setup_code_manager`.
+Bereits früher übernommene Codes liegen ebenfalls in diesem Inventar.
+Für den Dateiimport wählst du einen JSON- oder CSV-Export von Setup Code Manager.
 
 Exportdateien enthalten Einrichtungscodes im Klartext. Hinweise zur Aufbewahrung
 und zu den Wiederherstellungswegen stehen in

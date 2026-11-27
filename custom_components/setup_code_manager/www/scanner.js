@@ -253,7 +253,7 @@ async function openImageElement(file) {
 }
 
 /** Decode a user-selected photo locally without uploading or keeping the image. */
-export async function scanImage(file, { signal } = {}) {
+export async function scanImage(file, { signal, readDigits } = {}) {
   const checkCancelled = () => {
     if (signal?.aborted) throw new ScannerError("cancelled");
   };
@@ -293,6 +293,14 @@ export async function scanImage(file, { signal } = {}) {
       }
     }
     checkCancelled();
+    if (readDigits) {
+      drawingSurface(canvas, image.source, width, height, 2300);
+      let candidates = [];
+      try { candidates = await readDigits(canvas, signal); }
+      catch { checkCancelled(); } // QR/manual input still works if OCR is unavailable.
+      checkCancelled();
+      if (candidates.length) return { candidates };
+    }
     throw new ScannerError(unsupported ? "unsupported_code" : "qr_not_found");
   } catch (error) {
     throw error instanceof ScannerError ? error : new ScannerError("image_unreadable");

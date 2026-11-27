@@ -2,6 +2,8 @@
 import { translator, protocolNames } from './i18n.js';
 import { icon, deviceIcon } from './icons.js';
 import { startScanner, scanImage } from './scanner.js';
+import { readPrintedMatter, formatManual } from './ocr.js';
+import { runBackup } from './backup.js';
 import { filterRecords, availableRooms, availableFloors, availableLabels, groupRecordsByRoom, SORTS } from './filters.js';
 import { sanitizeViewSettings, preferenceKey, loadViewPreferences, normalizeViewPreferences, mergeLocalViews, MAX_SAVED_VIEWS } from './preferences.js';
 import { downloadPDF, MAX_PDF_RECORDS } from './pdf.js';
@@ -14,7 +16,7 @@ const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&am
 const clone = value => JSON.parse(JSON.stringify(value));
 const uid = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const isLinked = record => record.linked ?? (record.links || []).some(link => link.active !== false);
-const recordCodes = record => (record.codes || []).filter(code => code.value?.trim());
+const recordCodes = record => (record.codes || []).filter(code => code.stored === true || code.value?.trim());
 const hasCode = (record, protocol) => recordCodes(record).some(code => !protocol || code.protocol === protocol);
 const displayProtocols = record => [...new Set([...(record.protocols || []), ...recordCodes(record).map(code => code.protocol)])].filter(p => PROTOCOLS.includes(p));
 const protocolFrom = value => value.startsWith('MT:') ? 'matter' : value.startsWith('X-HM://') ? 'homekit' : /^90\d{30,}$/.test(value) ? 'zwave' : null;
@@ -34,6 +36,15 @@ class SetupCodeManagerPanel extends HTMLElement {
     this._viewsRevision = -1; this._viewsReady = false; this._viewsBusy = false; this._viewsLoadError = ''; this._appliedPreferenceScope = null; this._legacyPreferences = {views:[],defaultViewId:''};
     this._selection = new Set(); this._selecting = false; this._collapsedGroups = new Set();
     this._revealed = new Set(); this._revealedManual = new Set(); this._formRevealed = new Set(); this._compareRevealed = new Set();
+    this._previewSecrets = new Map(); this._shownCodes = new Map(); this._secretSequence = 0; this._searchSequence = 0;
+    this._onVisibility = () => {
+      if (!document.hidden) return;
+      this._maskDetails(); this._formRevealed.clear(); this._compareRevealed.clear();
+      if (['qr','copy-ready'].includes(this._modal?.kind)) this._closeModal(true);
+      else if (this._modal?.kind === 'ocr-confirm') this._openModal('editor');
+      else if (['editor','preview','revision','code-conflict'].includes(this._modal?.kind) && !this._readingPhoto) this._renderModal();
+      this._renderMain();
+    };
     this._loading = true; this._busy = false; this._loadSequence = 0; this._dialogGeneration = 0;
     this._onClick = this._onClick.bind(this);
     this._onInput = this._onInput.bind(this);
@@ -54,15 +65,12 @@ class SetupCodeManagerPanel extends HTMLElement {
   }
   set hass(value) {
     const languageChanged = this._hass?.language !== value?.language;
-    const userChanged = this._hass?.user?.id !== value?.user?.id;
+    const userChanged = this._hass?.user?.id !== value?.user?.id || this._hass?.user?.is_admin !== value?.user?.is_admin;
     this._hass = value;
     this._t = translator(value?.language);
     if (userChanged && this._started) {
-      if (this._modal?.kind === 'pdf') this._closeModal(true);
-      if (this._modal?.kind === 'relink-picker' || this._modal?.kind === 'relink-confirm') {
-        this._busy = false;
-        this._closeModal(true);
-      }
+      this._busy = false; if (this._modal) this._closeModal(true); this._devices = []; this._haDevices = [];
+      this._maskDetails(); this._clearSearch(); this._loading = true;
       this._preferenceScope = null; this._appliedPreferenceScope = null; this._viewsReady = false; this._viewsBusy = false;
       this._viewsWriteSequence = (this._viewsWriteSequence || 0) + 1; this._viewMigration = null;
       this._savedViews = []; this._defaultViewId = ''; this._activeViewId = ''; this._viewName = ''; this._legacyPreferences = {views:[],defaultViewId:''};
@@ -79,8 +87,12 @@ class SetupCodeManagerPanel extends HTMLElement {
   set narrow(value) { this._narrow = value; this.toggleAttribute('narrow', !!value); }
   set panel(value) { this._panel = value; }
   set route(value) { this._route = value; }
-  connectedCallback() { this._connected = true; globalThis.document?.addEventListener?.('pointerdown',this._outsideFilters,true); window.addEventListener?.('resize',this._resizeFilters); this._start(); }
+  connectedCallback() { this._connected = true; globalThis.document?.addEventListener?.('visibilitychange',this._onVisibility); globalThis.document?.addEventListener?.('pointerdown',this._outsideFilters,true); window.addEventListener?.('resize',this._resizeFilters); this._start(); }
   disconnectedCallback() {
+    this._backupController?.abort(); this._backupController = null;
+    globalThis.document?.removeEventListener?.('visibilitychange',this._onVisibility); this._maskDetails(); this._clearSearch();
+    this._baseRecord = null; this._preview = null; this._importSource = null; this._pendingCodes = null; this._formRevealed.clear(); this._compareRevealed.clear();
+    const modalRoot = this.shadowRoot.getElementById?.('modal-root'); if (modalRoot) modalRoot.innerHTML = '';
     globalThis.document?.removeEventListener?.('pointerdown',this._outsideFilters,true); window.removeEventListener?.('resize',this._resizeFilters);
     this._closeFilters(); this._captureQueue = null; this._pdfRecords = null; this._pdfNotes = false; this._pdfPending = false; this._selection.clear(); this._selectedId = null;
     this._connected = false; this._started = false; this._loadSequence++; this._refreshRequest = null; this._dialogGeneration++; this._draft = null; this._modal = null; this._busy = false;
@@ -128,7 +140,11 @@ class SetupCodeManagerPanel extends HTMLElement {
       await this._loadViewPreferences(result.view_preferences,result.view_preferences_error);
       if (!this._connected || this._hass?.user?.id !== userId) return;
       if (sequence !== this._loadSequence) return this._latestRefreshResult(sequence);
+      const changed = this._revision !== result.revision;
+      if (changed) { this._maskDetails(); if (['qr','copy-ready'].includes(this._modal?.kind)) this._closeModal(true); }
       this._devices = result.devices || []; this._revision = result.revision;
+      this._summaries = result.code_access === 'on_demand';
+      if (this._summaries && this._query.trim()) this._scheduleSearch();
       const currentIds = new Set(this._devices.map(record => record.id)); this._selection = new Set([...this._selection].filter(id => currentIds.has(id)));
       this._loadError = ''; this._loading = false;
       const previousIdentity = this._draft && JSON.stringify([this._draft.name,this._draft.location]);
@@ -148,7 +164,7 @@ class SetupCodeManagerPanel extends HTMLElement {
   }
   _busyBlocks(action) {
     if (['save-view','delete-view','set-default-view','clear-default-view','import-local-views'].includes(action) && (!this._viewsReady || this._viewsBusy)) return true;
-    return this._busy && !((this._readingPhoto || this._pdfPending) && action === 'close-modal');
+    return this._busy && !((this._readingPhoto || this._pdfPending || this._backupController) && action === 'close-modal');
   }
   _button(action, label, image = '', style = '', attrs = '') {
     return `<button type="button" class="button ${style}" data-action="${action}" ${attrs} ${this._busyBlocks(action) ? 'disabled' : ''}>${image ? icon(image) : ''}${esc(label)}</button>`;
@@ -164,10 +180,25 @@ class SetupCodeManagerPanel extends HTMLElement {
   }
   _focusSnapshot() {
     const el = this.shadowRoot.activeElement;
-    return el?.dataset.focus ? { key:el.dataset.focus, start:el.selectionStart, end:el.selectionEnd } : null;
+    if (el?.dataset.focus) return { key:el.dataset.focus, start:el.selectionStart, end:el.selectionEnd };
+    return el?.tagName === 'BUTTON' && !el.closest('dialog') ? this._actionFocus(el) : null;
+  }
+  _actionFocus(button) {
+    return { action:button.dataset.action, id:button.dataset.id, code:button.dataset.code, details:!!button.closest?.('.details') };
+  }
+  _actionTarget(origin) {
+    if (!origin?.action) return null;
+    const buttons = [...(this.shadowRoot.querySelectorAll?.('button[data-action]') || [])];
+    const visible = button => !button.disabled && (!button.getClientRects || button.getClientRects().length) && !button.closest('dialog');
+    const match = buttons.find(button => visible(button) && button.dataset.action === origin.action && button.dataset.id === origin.id && button.dataset.code === origin.code && !!button.closest('.details') === origin.details);
+    return match || (origin.id && buttons.find(button => visible(button) && button.classList.contains('row-open') && button.dataset.id === origin.id)) || null;
   }
   _restoreFocus(snapshot) {
     if (!snapshot) return;
+    if (snapshot.action) {
+      const target = this._actionTarget(snapshot) || this.shadowRoot.querySelector('[data-action="toggle-filters"]');
+      target?.focus({preventScroll:true}); return;
+    }
     const el = [...this.shadowRoot.querySelectorAll('[data-focus]')].find(node => node.dataset.focus === snapshot.key);
     if (!el) return;
     el.focus({ preventScroll:true });
@@ -259,7 +290,7 @@ class SetupCodeManagerPanel extends HTMLElement {
     if (!view) return;
     const s = sanitizeViewSettings(view.settings);
     this._tab = s.tab; this._protocol = s.protocol; this._codeStatusFilter = s.codeStatus; this._room = s.room; this._floor = s.floor; this._label = s.label; this._sort = s.sort; this._group = s.group;
-    this._query = ''; this._activeViewId = view.id; this._viewName = view.name; this._advancedFiltersOpen = !!(s.floor || s.label || s.group !== 'none');
+    this._query = ''; this._clearSearch(); this._activeViewId = view.id; this._viewName = view.name; this._advancedFiltersOpen = !!(s.floor || s.label || s.group !== 'none');
     this._selection.clear(); this._selectedId = null; this._collapsedGroups.clear(); if (render) this._renderMain();
   }
   async _deleteView() {
@@ -281,8 +312,32 @@ class SetupCodeManagerPanel extends HTMLElement {
     const merged = mergeLocalViews(this._savedViews,this._legacyPreferences.views);
     if (merged.added && await this._persistViews(merged.views,this._defaultViewId)) this._toast(this._t(merged.remaining ? 'localViewsPartial' : 'localViewsImported',{count:merged.added}));
   }
+  _clearSearch() {
+    clearTimeout(this._searchTimer); this._searchSequence++; this._searchIds = null; this._searchTerm = ''; this._searchPending = false; this._searchError = false;
+  }
+  _scheduleSearch() {
+    this._clearSearch();
+    const query = this._query.trim(), ticket = this._searchSequence, revision = this._revision;
+    if (!query || !this._summaries) return;
+    this._searchPending = true;
+    this._searchTimer = setTimeout(async () => {
+      const current = () => this._connected && ticket === this._searchSequence && this._query.trim() === query && revision === this._revision;
+      try {
+        const result = await this._api('search',{query});
+        if (!current()) return;
+        if (revision !== result.revision) { await this._refresh(false); return; }
+        this._searchTerm = query; this._searchIds = new Set(result.record_ids);
+      } catch { if (current()) this._searchError = true; }
+      if (current()) { this._searchPending = false; this._renderMain(); }
+    },160);
+  }
+  _filteredDevices(settings) {
+    const query = this._query.trim();
+    const devices = this._summaries && query ? this._devices.filter(record => this._searchTerm === query && this._searchIds?.has(record.id)) : this._devices;
+    return filterRecords(devices,{...settings,query:this._summaries ? '' : query},this._hass?.language);
+  }
   _visibleDevices() {
-    return filterRecords(this._devices, {...this._viewSettings(),query:this._query}, this._hass?.language);
+    return this._filteredDevices(this._viewSettings());
   }
   _structuredFilters() {
     const t = this._t;
@@ -297,12 +352,14 @@ class SetupCodeManagerPanel extends HTMLElement {
   }
   _hasFilters() { return !!(this._query.trim() || this._structuredFilters().length); }
   _selectField(field,label,choices,value) {
-    return `<label class="filter-field"><span>${esc(label)}</span><select data-field="${field}" data-focus="${field}" ${field === 'saved-view' && (!this._viewsReady || this._viewsBusy) ? 'disabled' : ''}>${choices.map(([id,name]) => `<option value="${esc(id)}" ${value === id ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select></label>`;
+    return `<label class="filter-field"><span>${esc(label)}</span><select data-field="${field}" data-focus="${field}" ${['saved-view','quick-view'].includes(field) && (!this._viewsReady || this._viewsBusy) ? 'disabled' : ''}>${choices.map(([id,name]) => `<option value="${esc(id)}"${field === 'quick-view' && !id ? ' disabled' : ''} ${value === id ? 'selected' : ''}>${esc(name)}</option>`).join('')}</select></label>`;
   }
   _inlineFilters() { return (this.getBoundingClientRect?.().width || window.innerWidth || 1200) <= 800; }
   _renderFilters(count,total) {
     const t = this._t, chips = this._structuredFilters();
     const localViews = mergeLocalViews(this._savedViews,this._legacyPreferences.views);
+    const active = this._savedViews.find(view => view.id === this._activeViewId);
+    const quickView = active && !this._query.trim() && JSON.stringify(sanitizeViewSettings(active.settings)) === JSON.stringify(this._viewSettings()) ? active.id : '';
     const rooms = availableRooms(this._devices,this._hass?.language);
     if (this._room.startsWith('room:') && !rooms.includes(this._room.slice(5))) rooms.push(this._room.slice(5));
     const metadataChoices = (items,prefix,selection,all,none,unknown) => {
@@ -333,8 +390,9 @@ class SetupCodeManagerPanel extends HTMLElement {
       <div class="filter-footer">${this._button('reset-filters',t('resetFilters'),'','text')}${this._button('close-filters',t('done'),'','text')}</div>
     </section>`;
     return `<div id="inventory-filters" class="filters">
-      <div class="search-row"><label class="search">${icon('search')}<input type="search" data-field="search" data-focus="search" placeholder="${esc(t('search'))}" aria-label="${esc(t('search'))}" value="${esc(this._query)}" autocomplete="off" spellcheck="false"></label>
+      <div class="search-row"><label class="search">${icon('search')}<input type="search" maxlength="1024" data-field="search" data-focus="search" placeholder="${esc(t('search'))}" aria-label="${esc(t('search'))}" value="${esc(this._query)}" autocomplete="off" spellcheck="false"></label>
       <button type="button" class="button filter-toggle" data-action="toggle-filters" data-focus="filter-toggle" aria-expanded="${this._filtersOpen}" aria-controls="filter-panel">${icon('filter')}${esc(t('filters'))}${chips.length ? `<span class="count">${chips.length}</span>` : ''}</button>
+      <div class="quick-view" ${this._savedViews.length ? '' : 'hidden'}>${this._selectField('quick-view',t('savedViews'),[['',t('chooseView')],...this._savedViews.map(view => [view.id,view.name])],quickView)}</div>
       ${this._selectField('sort-filter',t('sortBy'),SORTS.map(sort => [sort,t(`sort_${sort}`)]),this._sort)}</div>
       ${panel}
       <div id="active-filter-chips" class="active-filters" ${chips.length ? '' : 'hidden'} aria-label="${esc(t('activeFilters'))}">${chips.map(([key,label]) => `<button type="button" class="chip active" data-action="remove-filter" data-filter="${key}" aria-label="${esc(t('removeFilter',{name:label}))}">${esc(label)}${icon('close')}</button>`).join('')}</div>
@@ -347,6 +405,8 @@ class SetupCodeManagerPanel extends HTMLElement {
     const desired = document.createElement('div');
     desired.innerHTML = this._renderFilters(this._visibleDevices().length, this._devices.filter(record => this._tab === 'archive' ? record.archived : !record.archived && (this._tab === 'all' || (this._tab === 'linked') === isLinked(record))).length);
     root.querySelector('#filter-panel').setAttribute('aria-label',this._t('filters'));
+    const quickView = root.querySelector('.quick-view');
+    if (quickView) quickView.hidden = !this._savedViews.length;
     this._filterControlsPending = false;
     for (const el of root.querySelectorAll('[data-field]')) {
       const next = desired.querySelector(`[data-field="${el.dataset.field}"]`);
@@ -429,6 +489,7 @@ class SetupCodeManagerPanel extends HTMLElement {
     if (restoreFocus) button?.focus({preventScroll:true});
   }
   _resetFilters() {
+    this._clearSearch();
     this._query = ''; this._protocol = ''; this._codeStatusFilter = 'all'; this._room = ''; this._floor = ''; this._label = ''; this._activeViewId = ''; this._viewName = '';
     this._selection.clear(); this._renderMain(); this.shadowRoot.querySelector('[data-field="search"]')?.focus({preventScroll:true});
   }
@@ -437,7 +498,7 @@ class SetupCodeManagerPanel extends HTMLElement {
     const action = this._selecting ? 'toggle-record' : 'select';
     const id = esc(record.id);
     const protocols = displayProtocols(record).map(protocol => protocolNames[protocol]).join(', ');
-    const codeStatus = this._codeStatus(record, { showMissingIcon: true });
+    const codeStatus = this._codeStatus(record, { showMissingIcon: true, protocol: this._protocol, actionable: !this._selecting && !record.archived });
     const haStatus = this._status(record);
     return `<tr data-action="${action}" data-id="${id}" class="${selected?.id === record.id ? 'selected' : ''}">
       <td><div class="device-name">
@@ -467,9 +528,13 @@ class SetupCodeManagerPanel extends HTMLElement {
     const t = this._t, selected = this._selectionRecords();
     return `<div class="selection-bar"><strong>${esc(t('selectedCount',{count:selected.length}))}</strong>${this._button('select-results',t(rows.length && rows.every(record => this._selection.has(record.id)) ? 'deselectAll' : 'selectResults'),'','text')}${this._button('export-selected',t('export'),'upload','',selected.length ? '' : 'disabled')}${this._button('pdf-selected',t('pdfCards'),'pdf','',selected.length && selected.length <= MAX_PDF_RECORDS ? '' : 'disabled')}</div>`;
   }
-  _codeStatus(record, { showMissingIcon = false } = {}) {
-    const stored = hasCode(record);
+  _codeStatus(record, { showMissingIcon = false, actionable = false, protocol = '' } = {}) {
+    const stored = hasCode(record,protocol);
     const symbol = stored || showMissingIcon ? icon(stored ? 'check' : 'warning') : '';
+    if (!stored && actionable) {
+      const label = esc(this._t(protocol ? 'addProtocolCodeFor' : 'addCodeFor',{name:record.name,protocol:protocolNames[protocol]}));
+      return `<button type="button" class="code-status missing add-missing" data-action="add-missing" data-id="${esc(record.id)}" aria-label="${label}" title="${label}">${symbol}${esc(this._t('noCode'))}</button>`;
+    }
     return `<span class="code-status ${stored ? 'stored' : 'missing'}">${symbol}${esc(this._t(stored ? 'codeStored' : 'noCode'))}</span>`;
   }
   _identityManaged(record = this._draft) { return !!record?.links?.some(link => link.active !== false); }
@@ -509,22 +574,25 @@ class SetupCodeManagerPanel extends HTMLElement {
     const active = this._devices.filter(record => !record.archived);
     const counts = { all:active.length, linked:active.filter(isLinked).length, unlinked:active.filter(record => !isLinked(record)).length, archive:this._devices.filter(record => record.archived).length };
     const selected = this._devices.find(record => record.id === this._selectedId);
+    if (this._renderedSelectedId && this._renderedSelectedId !== selected?.id) this._maskDetails();
     const rows = this._visibleDevices();
     let content;
     if (this._hass?.user?.is_admin === false) content = this._notice(t('accessDenied'), 'error');
-    else if (this._loading) content = `<div class="loading" role="status"><span class="spinner"></span>${esc(t('loading'))}</div>`;
+    else if (this._searchError && this._query.trim()) content = this._notice(t('loadFailed'),'error',this._button('retry-search',t('retry'),'refresh','text'));
+    else if (this._loading || this._searchPending && this._query.trim()) content = `<div class="loading" role="status"><span class="spinner"></span>${esc(t('loading'))}</div>`;
     else if (!rows.length) {
       const filtered = this._hasFilters();
       const title = filtered ? 'noResults' : this._tab === 'archive' ? 'emptyArchive' : this._tab === 'linked' ? 'emptyLinked' : this._tab === 'unlinked' && this._devices.length ? 'emptyUnlinked' : 'emptyTitle';
       content = `<div class="empty">${icon(this._tab === 'archive' ? 'archive' : 'key')}<h2>${esc(t(title))}</h2><p>${esc(t(filtered ? 'noResultsBody' : this._tab === 'archive' ? 'emptyArchiveBody' : 'emptyBody'))}</p>${filtered ? '' : this._button('add',t('add'),'plus','primary')}</div>`;
     } else content = this._renderDeviceTable(rows,selected);
-    const markup = `<div class="app"><div id="inventory-workspace" class="workspace ${selected ? 'has-details' : ''}"><main class="main"><header id="inventory-header" class="topbar"><button type="button" class="icon-button menu-button" data-action="ha-menu" aria-label="${esc(t('menu'))}">${icon('menu')}</button><h1>Setup Code Manager</h1><span class="refresh-action">${this._iconButton('refresh', t('refresh'), 'refresh')}</span><span class="mobile-toolbar">${this._iconButton('menu', t('menu'), 'more')}</span></header><div id="inventory-toolbar" class="toolbar">${this._button('add',t('add'),'plus','primary')}${this._button('import',t('import'),'download','secondary-action')}${this._button('export',t('export'),'upload','secondary-action')}${this._button('capture-start',t('captureAction'),'camera','secondary-action')}</div><nav id="inventory-tabs" class="tabs" aria-label="${esc(t('device'))}">${['all','linked','unlinked','archive'].map(tab => `<button type="button" class="tab ${this._tab === tab ? 'active' : ''}" data-action="tab" data-tab="${tab}" aria-pressed="${this._tab === tab}">${esc(t(tab))}<span class="count">${counts[tab]}</span></button>`).join('')}</nav><p id="inventory-caption" class="caption">${esc(t(this._tab === 'archive' ? 'archiveHint' : 'activeHint'))}</p>${this._renderFilters(rows.length, counts[this._tab])}<div id="inventory-error">${this._loadError ? this._notice(this._loadError, 'error', `<div>${this._button('refresh',t('retry'),'refresh','text')}</div>`) : ''}</div><div id="inventory-selection">${this._renderSelectionBar(rows)}</div><div id="inventory-results">${content}</div></main>${selected ? this._renderDetails(selected) : '<aside id="inventory-details" class="details" hidden></aside>'}</div></div>`;
+    const markup = `<div class="app"><div id="inventory-workspace" class="workspace ${selected ? 'has-details' : ''}"><main class="main"><header id="inventory-header" class="topbar"><button type="button" class="icon-button menu-button" data-action="ha-menu" aria-label="${esc(t('menu'))}">${icon('menu')}</button><h1>Setup Code Manager</h1><span class="refresh-action">${this._iconButton('refresh', t('refresh'), 'refresh')}</span><span class="mobile-toolbar">${this._iconButton('menu', t('menu'), 'more')}</span></header><div id="inventory-toolbar" class="toolbar">${this._button('add',t('add'),'plus','primary')}${this._button('import',t('import'),'download','secondary-action')}${this._button('export',t('export'),'upload','secondary-action')}${this._button('capture-start',t('captureAction'),'camera','secondary-action')}</div><nav id="inventory-tabs" class="tabs" aria-label="${esc(t('device'))}">${['all','linked','unlinked','archive'].map(tab => `<button type="button" class="tab ${this._tab === tab ? 'active' : ''}" data-action="tab" data-tab="${tab}" aria-pressed="${this._tab === tab}">${esc(t(tab))}<span class="count">${counts[tab]}</span></button>`).join('')}</nav><p id="inventory-caption" class="caption" data-archive="${this._tab === 'archive'}">${esc(t(this._tab === 'archive' ? 'archiveHint' : 'activeHint'))}</p>${this._renderFilters(rows.length, counts[this._tab])}<div id="inventory-error">${this._loadError ? this._notice(this._loadError, 'error', `<div>${this._button('refresh',t('retry'),'refresh','text')}</div>`) : ''}</div><div id="inventory-selection">${this._renderSelectionBar(rows)}</div><div id="inventory-results">${content}</div></main>${selected ? this._renderDetails(selected) : '<aside id="inventory-details" class="details" hidden></aside>'}</div></div>`;
     const incremental = !!this.shadowRoot.getElementById('inventory-results');
     if (incremental) {
       const update = (id,html) => { this.shadowRoot.getElementById(id).innerHTML = html; };
       const desired = document.createElement('div');
       desired.innerHTML = markup;
       for (const id of ['inventory-header','inventory-toolbar','inventory-tabs','inventory-caption','inventory-error','inventory-selection','inventory-results']) update(id,desired.querySelector(`#${id}`).innerHTML);
+      this.shadowRoot.getElementById('inventory-caption').setAttribute('data-archive',String(this._tab === 'archive'));
       this.shadowRoot.getElementById('inventory-tabs').setAttribute('aria-label',t('device'));
       this.shadowRoot.getElementById('inventory-workspace').classList.toggle('has-details',!!selected);
       const detail = this.shadowRoot.getElementById('inventory-details');
@@ -543,13 +611,13 @@ class SetupCodeManagerPanel extends HTMLElement {
     }
     this._setupFilterPanel();
     // Retained controls already own focus, including while iOS dismisses its picker.
-    const filterFocus = ['search','filter-toggle','sort-filter','room-filter','protocol-filter','code-status-filter','floor-filter','label-filter','group-filter','saved-view','view-name'];
+    const filterFocus = ['search','filter-toggle','sort-filter','room-filter','protocol-filter','code-status-filter','floor-filter','label-filter','group-filter','saved-view','quick-view','view-name'];
     if (!incremental || !filterFocus.includes(snapshot?.key)) this._restoreFocus(snapshot);
   }
   _closeDetails() {
     const id = this._selectedId;
     if (!id) return;
-    this._selectedId = null; this._revealed.clear(); this._revealedManual.clear(); this._renderMain();
+    this._selectedId = null; this._maskDetails(); this._renderMain();
     const row = [...this.shadowRoot.querySelectorAll('.row-open')].find(element => element.dataset.id === id);
     (row || this.shadowRoot.querySelector('[data-field="search"]'))?.focus();
   }
@@ -559,21 +627,82 @@ class SetupCodeManagerPanel extends HTMLElement {
     const linkLabel = this._canRelink(record) ? 'relink' : links.length ? 'changeLinks' : 'linkDevice';
     return `<aside id="inventory-details" class="details" aria-label="${esc(record.name)}"><div class="detail-heading"><div><h2 title="${esc(record.name)}">${esc(record.name)}</h2></div>${this._iconButton('close-details',t('close'),'close')}</div><div class="detail-body"><div class="detail-meta">${this._codeStatus(record)}<p>${esc([record.location,record.model].filter(Boolean).join(' · ') || record.manufacturer || '')}</p>${record.archived ? `<span class="badge">${icon('archive')}${esc(t('archived'))}</span>` : ''}</div><div class="detail-actions">${this._button('edit',t('edit'),'','text',`data-id="${esc(record.id)}"`)}${this._button('pdf-record',t('pdfCard'),'pdf','text',`data-id="${esc(record.id)}"`)}</div><section class="detail-section"><h3>Home Assistant</h3><div class="detail-status">${this._status(record)}</div>${links.some(link => link.active === false) ? `<p class="muted small" style="margin-top:12px">${esc(t('removedHint'))}</p>` : ''}${links.filter(link => link.active !== false).map(link => `<div class="link-item"><span class="small muted">${esc(link.name || record.name)}</span><a class="button" href="/config/devices/device/${encodeURIComponent(link.ha_device_id)}">${icon('external')}${esc(t('openDevice'))}</a></div>`).join('')}${this._button('edit-links',t(linkLabel),'link','text',`data-id="${esc(record.id)}"`)}</section><section class="detail-section"><h3>${esc(t('setupCodes'))}</h3>${recordCodes(record).length ? recordCodes(record).map(code => this._renderCode(code)).join('') : `<p class="muted">${esc(t('noCode'))}</p>`}${this._button('edit-codes',t('addCode'),'plus','text',`data-id="${esc(record.id)}" data-focus="detail-code-editor-${esc(record.id)}"`)}</section><section class="detail-section"><h3>${esc(t('note'))}</h3><p class="muted">${esc(record.notes || t('noNote'))}</p>${record.manufacturer || record.serial_number ? `<p class="small muted" style="margin-top:16px">${esc([record.manufacturer, record.serial_number].filter(Boolean).join(' · '))}</p>` : ''}</section><section class="detail-section detail-bottom">${this._button('archive',t(record.archived ? 'restore' : 'archiveAction'),record.archived ? 'restore' : 'archive','text',`data-id="${esc(record.id)}"`)}${this._button('delete',t('delete'),'trash','text danger',`data-id="${esc(record.id)}"`)}</section></div></aside>`;
   }
+  _maskDetails() {
+    this._secretSequence++; this._previewSecrets.clear(); this._shownCodes.clear(); this._revealed.clear(); this._revealedManual.clear();
+  }
+  async _readPrivate(record, code) {
+    const ticket = ++this._secretSequence, revision = this._revision, generation = this._dialogGeneration;
+    const selected = this._selectedId, modal = this._modal, user = this._hass?.user?.id;
+    const current = () => this._connected && !globalThis.document?.hidden && ticket === this._secretSequence && selected === this._selectedId && revision === this._revision && generation === this._dialogGeneration && modal === this._modal && user === this._hass?.user?.id;
+    try {
+      const result = await this._api('read_record',{record_id:record.id,expected_revision:revision,...(code ? {code_id:code.id} : {})});
+      if (current()) return code ? result.code : result.record;
+    } catch (error) {
+      if (current()) this._toast(this._errorText(error,'loadFailed'));
+    }
+    return null;
+  }
   _manualValue(code) {
     return code?.protocol === 'matter' && code.value?.startsWith('MT:') && typeof code.manual_value === 'string' && /^(?:[0-9]{11}|[0-9]{21})$/.test(code.manual_value) ? code.manual_value : '';
   }
   _renderManualCode(code) {
     const value = this._manualValue(code);
-    if (!value) return '';
+    if (!value && !code.has_manual) return '';
     const t = this._t; const revealed = this._revealedManual.has(code.id);
-    const formatted = value.length === 11 ? `${value.slice(0,4)}-${value.slice(4,7)}-${value.slice(7)}` : `${value.slice(0,4)}-${value.slice(4,7)}-${value.slice(7,10)}-${value.slice(10,15)}-${value.slice(15,20)}-${value.slice(20)}`;
+    const formatted = value ? formatManual(value) : '';
     return `<div class="manual-code"><div class="code-title"><div><strong>${esc(t('manualCode'))}</strong><small>${esc(t('manualDerived'))}</small></div><div class="code-actions">${this._iconButton('reveal-manual',t(revealed ? 'manualHide' : 'manualReveal'),'eye',`data-code="${esc(code.id)}"`)}${this._iconButton('copy-manual',t('manualCopy'),'copy',`data-code="${esc(code.id)}"`)}</div></div><div class="secret ${revealed ? '' : 'masked'}">${revealed ? esc(formatted) : '••••••••••••'}</div></div>`;
   }
   _renderCode(code) {
+    code = this._shownCodes.get(code.id) || code;
     const t = this._t;
-    return `<div class="code-card"><div class="code-title"><div><strong>${esc(protocolNames[code.protocol] || code.protocol)}</strong><small>${esc(code.label || t('originalCode'))}</small></div><div class="code-actions">${this._iconButton('reveal',t(this._revealed.has(code.id) ? 'hide' : 'reveal'),'eye',`data-code="${esc(code.id)}"`)}${this._iconButton('copy',t('copy'),'copy',`data-code="${esc(code.id)}"`)}${this._canQR(code) ? this._iconButton('qr',t('qr'),'qr',`data-code="${esc(code.id)}"`) : ''}</div></div>${this._manualValue(code) ? `<div class="code-value-label">${esc(t('qrContent'))}</div>` : ''}<div class="secret ${this._revealed.has(code.id) ? '' : 'masked'}">${this._revealed.has(code.id) ? esc(code.value) : '••••••••••••'}</div>${this._renderManualCode(code)}</div>`;
+    return `<div class="code-card"><div class="code-title"><div><strong>${esc(protocolNames[code.protocol] || code.protocol)}</strong><small>${esc(code.label || t('originalCode'))}</small></div><div class="code-actions">${this._iconButton('reveal',t(this._revealed.has(code.id) ? 'hide' : 'reveal'),'eye',`data-code="${esc(code.id)}"`)}${this._iconButton('copy',t('copy'),'copy',`data-code="${esc(code.id)}"`)}${this._canQR(code) ? this._iconButton('qr',t('qr'),'qr',`data-code="${esc(code.id)}"`) : ''}</div></div>${code.has_manual || this._manualValue(code) ? `<div class="code-value-label">${esc(t('qrContent'))}</div>` : ''}<div class="secret ${this._revealed.has(code.id) ? '' : 'masked'}">${this._revealed.has(code.id) ? esc(code.value) : '••••••••••••'}</div>${this._renderManualCode(code)}</div>`;
   }
-  async _copyCodeValue(value, successKey = 'copied', failureKey = 'copyFailed') {
+  async _codeAction(action,record,summary) {
+    let code = this._shownCodes.get(summary.id) || summary;
+    const manual = action.endsWith('-manual');
+    const revealed = manual ? this._revealedManual : this._revealed;
+    if (action.startsWith('reveal') && revealed.delete(code.id)) {
+      if (!this._revealed.has(code.id) && !this._revealedManual.has(code.id)) this._shownCodes.delete(code.id);
+      this._renderMain();
+      return;
+    }
+    if (action.startsWith('copy')) {
+      const success = manual ? 'manualCopied' : 'copied', failure = manual ? 'manualCopyFailed' : 'copyFailed';
+      const getValue = item => manual ? this._manualValue(item) : item?.value;
+      if (!code.stored || code.value) { await this._copyCodeValue(getValue(code),success,failure); return; }
+      const request = this._readPrivate(record,code);
+      const ticket = this._secretSequence;
+      if (globalThis.ClipboardItem && navigator.clipboard?.write) {
+        // WebKit requires clipboard.write during the tap, even if its content is pending.
+        const text = request.then(result => {
+          const value = getValue(result);
+          if (!value) throw new Error('Unavailable');
+          return new Blob([value],{type:'text/plain'});
+        });
+        try {
+          await navigator.clipboard.write([new ClipboardItem({'text/plain':text})]);
+          this._toast(this._t(success)); return;
+        } catch { await text.catch(()=>{}); }
+      }
+      const value = getValue(await request);
+      const current = () => ticket === this._secretSequence && !globalThis.document?.hidden && !this._modal && this._selectedId === record.id;
+      if (!value || !current()) return;
+      if (!await this._copyCodeValue(value,success,failure,true) && current()) {
+        // A fresh tap allows the native copy command on local HTTP.
+        this._openModal('copy-ready',{value,success,failure,name:record.name});
+      }
+      return;
+    }
+    if (code.stored && !code.value) {
+      code = await this._readPrivate(record,code);
+      if (!code) return;
+    }
+    if (action === 'qr') { this._openModal('qr',{code,name:record.name}); return; }
+    if (manual && !this._manualValue(code)) return;
+    if (this._summaries) this._shownCodes.set(code.id,code);
+    revealed.add(code.id); this._renderMain();
+  }
+  async _copyCodeValue(value, successKey = 'copied', failureKey = 'copyFailed', quiet = false) {
     if (!value) return;
     try {
       if (typeof navigator.clipboard?.writeText === 'function') await navigator.clipboard.writeText(value);
@@ -589,10 +718,10 @@ class SetupCodeManagerPanel extends HTMLElement {
           if (!document.execCommand?.('copy')) throw new Error('copy_unavailable');
         } finally { input.remove(); previous?.focus({preventScroll:true}); }
       }
-      this._toast(this._t(successKey));
-    } catch { this._toast(this._t(failureKey)); }
+      this._toast(this._t(successKey)); return true;
+    } catch { if (!quiet) this._toast(this._t(failureKey)); return false; }
   }
-  _canQR(code) { return /^(MT:|X-HM:\/\/)/.test(code.value || '') || code.protocol === 'zwave' && /^90\d{30,}$/.test(code.value || ''); }
+  _canQR(code) { return code.has_qr || /^(MT:|X-HM:\/\/)/.test(code.value || '') || code.protocol === 'zwave' && /^90\d{30,}$/.test(code.value || ''); }
   _newDraft(record, fromCodeAction = false) {
     this._dialogGeneration++;
     this._codeEditorFromDetails = fromCodeAction;
@@ -602,27 +731,30 @@ class SetupCodeManagerPanel extends HTMLElement {
     this._formRevealed.clear(); this._compareRevealed.clear(); this._activeProtocol = this._protocol || 'matter';
   }
   _openModal(kind, data = {}) {
+    if (!this._modal) this._modalOrigin = this._invoker;
     this._closeFilters(); this._stopCamera(); this._modalError = ''; this._modal = { kind,...data };
     this._renderModal();
   }
   _closeModal(force = false, preserveCapture = false) {
-    if (this._busyBlocks('close-modal')) return;
-    const closingPDF = this._modal?.kind === 'pdf';
+    if (!force && this._busyBlocks('close-modal')) return;
+    this._backupController?.abort(); this._backupController = null; this._previewSecrets.clear();
     if (this._readingPhoto) {
       this._photoController?.abort(); this._photoController = null; this._readingPhoto = false; this._busy = false;
     }
-    if (!force && this._draft && this._dirty && ['editor','picker','choose-record','code-conflict','scanner','start','revision','duplicate'].includes(this._modal?.kind) && !window.confirm(this._t('discard'))) { this._renderModal(); return; }
+    if (!force && this._draft && this._dirty && ['editor','picker','choose-record','code-conflict','scanner','start','revision','duplicate','ocr-confirm'].includes(this._modal?.kind) && !window.confirm(this._t('discard'))) { this._renderModal(); return; }
     const returnToCodeAction = this._codeEditorFromDetails && this._selectedId && this._selectedId === this._draft?.id;
     this._dialogGeneration++; this._stopCamera(); this._photoController?.abort(); this._photoController = null; this._readingPhoto = false; this.shadowRoot.querySelector('dialog')?.close();
     this.shadowRoot.getElementById('modal-root').innerHTML = ''; this._modal = null;
-    this._draft = null; this._pendingCodes = null; this._preview = null; this._importSource = null; this._pdfRecords = null; this._pdfNotes = false; this._pdfPending = false;
+    this._draft = null; this._baseRecord = null; this._pendingCodes = null; this._preview = null; this._importSource = null; this._pdfRecords = null; this._pdfNotes = false; this._pdfPending = false;
     this._codeEditorFromDetails = false;
     this._focusScanResult = false;
-    if (closingPDF) this._busy = false;
+    this._busy = false;
     if (!preserveCapture) this._captureQueue = null;
     this._formRevealed.clear(); this._compareRevealed.clear();
     const returnAction = returnToCodeAction ? 'edit-codes' : this._selectedId ? 'edit' : 'add';
-    this.shadowRoot.querySelector(`[data-action="${returnAction}"]`)?.focus();
+    const target = this._actionTarget(this._modalOrigin) || this.shadowRoot.querySelector(`[data-action="${returnAction}"]`);
+    this._modalOrigin = null;
+    target?.focus({preventScroll:true});
   }
   _modalFrame(title, body, footer = '', wide = false, feedback = null) {
     return `<dialog ${wide ? 'class="wide"' : ''} aria-labelledby="dialog-title"><div class="dialog-shell"><header class="dialog-head"><h2 id="dialog-title">${esc(title)}</h2>${this._iconButton('close-modal',this._t('close'),'close')}</header><div class="dialog-body">${feedback === null && this._modalError ? this._notice(this._modalError,'error') : ''}${body}</div>${feedback ? `<div class="dialog-feedback">${feedback}</div>` : ''}${footer ? `<footer class="dialog-foot">${footer}</footer>` : ''}</div></dialog>`;
@@ -644,6 +776,8 @@ class SetupCodeManagerPanel extends HTMLElement {
     if (kind === 'start') html = this._modalFrame(t('addTitle'), `<p>${esc(t(this._canLiveScan() ? 'addIntro' : 'photoHint'))}</p><div class="choice-list">${[['start-scan',this._canLiveScan() ? 'scan' : 'takePhoto','camera'],['start-photo','photo','image'],['start-manual','manual','keyboard']].map(([action,label,image]) => `<button type="button" class="choice" data-action="${action}">${icon(image)}<span class="grow">${esc(t(label))}</span>${icon('chevron')}</button>`).join('')}</div><p class="small muted" style="margin-top:22px">${esc(t('noPairing'))}</p>`);
     else if (kind === 'menu') html = this._modalFrame(t('menu'),`<div class="choice-list">${this._button('import',t('import'),'download')}${this._button('export',t('export'),'upload')}${this._button('capture-start',t('captureMissing'),'camera')}${this._button('pdf-filtered',t('pdfCards'),'pdf')}${this._button('refresh-menu',t('refresh'),'refresh')}</div>`);
     else if (kind === 'editor') html = this._renderEditor();
+    else if (kind === 'copy-ready') html = this._modalFrame(t('copy'),`<p>${esc(this._modal.name)}</p>`,cancel+this._button('copy-ready',t('copy'),'copy','primary'));
+    else if (kind === 'ocr-confirm') html = this._modalFrame(t('printedCode'),`<p>${esc(t('checkPrintedCode'))}</p><div class="choice-list">${this._modal.candidates.map((digits,index) => this._button('use-printed',formatManual(digits),'check','',`data-index="${index}"`)).join('')}</div>`,this._button('back-editor',t('back')));
     else if (kind === 'scanner') html = this._modalFrame(t('scanTitle'), `<p>${esc(t('scanHint'))}</p><div id="scanner-error"></div><div class="scanner-frame"><video id="scan-video" autoplay muted playsinline></video><div class="scan-guide"></div><div class="camera-status" id="camera-status">${esc(t('cameraLoading'))}</div></div><p class="small">${esc(t('noPairing'))}</p><div class="scanner-buttons">${this._button('scan-capture',t('takePhoto'),'camera')}${this._button('scan-photo',t('photo'),'image')}${this._button('scan-manual',t('enterCode'),'keyboard')}</div>`);
     else if (kind === 'picker') html = this._renderPicker();
     else if (kind === 'relink-picker') html = this._renderRelinkPicker();
@@ -657,6 +791,7 @@ class SetupCodeManagerPanel extends HTMLElement {
     else if (kind === 'pdf') html = this._renderPDF();
     else if (kind === 'capture-setup') html = this._renderCaptureSetup();
     else if (kind === 'import') html = this._modalFrame(t('importTitle'),`<p>${esc(t('importIntro'))}</p><div class="choice-list">${this._button('pick-import',t('chooseFile'),'download')}</div>`);
+    else if (kind === 'unlock') html = this._modalFrame(t('unlockBackup'),this._passwordInput(false),cancel+this._button('unlock-backup',t('unlockBackup'),'','primary'));
     else if (kind === 'preview') html = this._renderPreview();
     else if (kind === 'revision') html = this._renderRevision();
     previousDialog?.close();
@@ -905,9 +1040,10 @@ class SetupCodeManagerPanel extends HTMLElement {
     if (records.length > 1 || records.some(record => record.archived) || records.length && this._draft.id && records[0].id !== this._draft.id) {
       this._openModal('choose-record',{records}); return;
     }
-    this._useHADevice(device,records[0]);
+    return this._useHADevice(device,records[0]);
   }
-  _useHADevice(device,record) {
+  async _useHADevice(device,record) {
+    if (this._summaries && record && record.id !== this._draft.id && record.codes.length) { record = await this._readPrivate(record); if (!record) return; }
     const originalDraft = this._draft;
     const changedCodes = recordCodes(originalDraft).filter(code => !this._baseRecord?.id || !this._baseRecord.codes?.some(base => base.protocol === code.protocol && base.value === code.value && base.label === code.label));
     if (record && record.id !== originalDraft.id) {
@@ -944,7 +1080,7 @@ class SetupCodeManagerPanel extends HTMLElement {
   _compareRecord(record,title,key) {
     if (!record) return `<div class="compare-box"><h3>${esc(title)}</h3><p>—</p></div>`;
     const t = this._t;
-    return `<div class="compare-box"><h3>${esc(title)}</h3><dl>${[['name','name'],['location','location'],['manufacturer','manufacturer'],['model','model'],['serial_number','serial'],['notes','note']].map(([field,label]) => `<dt>${esc(t(label))}</dt><dd>${esc(record[field] || '—')}</dd>`).join('')}<dt>${esc(t('archive'))}</dt><dd>${esc(t(record.archived ? 'archived' : 'activeHint'))}</dd></dl>${recordCodes(record).map((code,index) => `<div style="margin-top:12px"><strong class="small">${esc(protocolNames[code.protocol] || code.protocol)}</strong><div class="secret ${this._compareRevealed.has(`${key}-${index}`) ? '' : 'masked'}">${this._compareRevealed.has(`${key}-${index}`) ? esc(code.value) : '••••••••••••'}</div>${code.label ? `<small class="muted">${esc(code.label)}</small>` : ''}${this._button('compare-reveal',t(this._compareRevealed.has(`${key}-${index}`) ? 'hide' : 'reveal'),'eye','text',`data-key="${esc(`${key}-${index}`)}"`)}</div>`).join('')}</div>`;
+    return `<div class="compare-box"><h3>${esc(title)}</h3><dl>${[['name','name'],['location','location'],['manufacturer','manufacturer'],['model','model'],['serial_number','serial'],['notes','note']].map(([field,label]) => `<dt>${esc(t(label))}</dt><dd>${esc(record[field] || '—')}</dd>`).join('')}<dt>${esc(t('archive'))}</dt><dd>${esc(t(record.archived ? 'archived' : 'activeHint'))}</dd></dl>${recordCodes(record).map((code,index) => `<div style="margin-top:12px"><strong class="small">${esc(protocolNames[code.protocol] || code.protocol)}</strong><div class="secret ${this._compareRevealed.has(`${key}-${index}`) ? '' : 'masked'}">${this._compareRevealed.has(`${key}-${index}`) ? esc(code.value || this._previewSecrets.get(`${key}-${index}`)) : '••••••••••••'}</div>${code.label ? `<small class="muted">${esc(code.label)}</small>` : ''}${this._button('compare-reveal',t(this._compareRevealed.has(`${key}-${index}`) ? 'hide' : 'reveal'),'eye','text',`data-key="${esc(`${key}-${index}`)}"`)}</div>`).join('')}</div>`;
   }
   _renderRevision() {
     const t = this._t;
@@ -1029,9 +1165,11 @@ class SetupCodeManagerPanel extends HTMLElement {
       if (this._modal?.kind !== 'editor') this._openModal('editor');
       else this._renderModal();
       try {
-        const value = await scanImage(file,{signal:controller.signal});
+        const value = await scanImage(file,{signal:controller.signal,readDigits:(!this._captureQueue || this._captureQueue.protocol === 'matter') ? readPrintedMatter : null});
         if (generation !== this._dialogGeneration || !this._draft || controller.signal.aborted) return;
-        this._busy = false; this._readingPhoto = false; this._receiveScan(value);
+        this._busy = false; this._readingPhoto = false;
+        if (value.candidates) this._openModal('ocr-confirm',{candidates:value.candidates});
+        else this._receiveScan(value);
       } catch (error) {
         if (generation !== this._dialogGeneration || !this._draft || controller.signal.aborted) return;
         this._busy = false; this._readingPhoto = false; this._draftError = this._errorText(error,'scanFailed'); this._openModal('editor');
@@ -1050,14 +1188,19 @@ class SetupCodeManagerPanel extends HTMLElement {
     record.codes = record.codes.filter(code => code.value?.trim()).map(({id,protocol,value,label}) => ({id,protocol,value:value.trim(),label}));
     if (this._captureQueue && (record.id !== this._captureQueue.ids[this._captureQueue.index] || !hasCode(record,this._captureQueue.protocol))) { this._draftError = this._t('captureCodeRequired',{protocol:protocolNames[this._captureQueue.protocol]}); this._openModal('editor'); return; }
     if (!record.name) { this._draftError = this._t('validationError'); this._openModal('editor'); return; }
-    if (!ignoreDuplicates) {
+    if (!ignoreDuplicates && !this._summaries) {
       const matches = this._devices.filter(other => other.id !== record.id && recordCodes(other).some(code => record.codes.some(incoming => incoming.protocol === code.protocol && incoming.value === code.value)));
       if (matches.length) { this._openModal('duplicate',{names:matches.map(item => item.name)}); return; }
     }
     const generation = this._dialogGeneration, draft = this._draft, queue = this._captureQueue || null;
     this._busy = true; this._modal = {kind:'editor'}; this._renderModal();
     try {
-      const result = await this._api('save',{record,expected_revision:this._baseRevision});
+      if (this._summaries && !ignoreDuplicates && record.codes.length) {
+        const matches = await this._api('duplicates',{record_id:record.id || '',codes:record.codes.map(({protocol,value}) => ({protocol,value}))});
+        if (generation !== this._dialogGeneration || draft !== this._draft) return;
+        if (matches.length) { this._busy = false; this._openModal('duplicate',{names:matches.map(other => other.name)}); return; }
+      }
+      const result = await this._api('save',{record,expected_revision:this._baseRevision,...(this._summaries ? {codes_loaded:true} : {})});
       if (generation !== this._dialogGeneration || draft !== this._draft) return;
       this._busy = false; this._dirty = false;
       this._selectedId = result.id || result.record?.id || record.id;
@@ -1094,10 +1237,15 @@ class SetupCodeManagerPanel extends HTMLElement {
     this._exportScopes = {all:null,visible:this._visibleDevices().map(record => record.id),selected:this._selectionRecords().map(record => record.id)};
     this._openModal('export');
   }
+  _passwordInput(creating) {
+    const t = this._t;
+    const field = (key,label) => `<label class="filter-field"><span>${esc(t(label))}</span><input type="password" data-field="${key}" maxlength="1024" autocomplete="${creating ? 'new-password' : 'current-password'}" autocapitalize="none" spellcheck="false"></label>`;
+    return `<div class="backup-passwords">${field('backup-password','backupPassword')}${creating ? field('backup-repeat','backupRepeat')+`<p class="small muted">${esc(t('passwordHint'))}</p>` : ''}</div>`;
+  }
   _renderExport() {
     const t = this._t;
     const scopes = [['all',t('exportScope'),this._devices.length],['visible',t('exportFiltered'),this._exportScopes.visible.length],['selected',t('exportSelected'),this._exportScopes.selected.length]];
-    const body = `<fieldset class="scope-options"><legend>${esc(t('exportWhich'))}</legend>${scopes.map(([value,label,count]) => `<label class="check-label"><input type="radio" name="export-scope" data-field="export-scope" value="${value}" ${this._exportScope === value ? 'checked' : ''} ${!count ? 'disabled' : ''}>${esc(label)} <span class="count">${count}</span></label>`).join('')}</fieldset><div class="export-options">${[['json','jsonBackup','JSON'],['csv','tableFormat','CSV']].map(([format,label,description]) => `<label class="export-option"><input type="radio" name="export-format" data-field="export-format" value="${format}" ${(this._exportFormat || 'json') === format ? 'checked' : ''}><div><strong>${esc(t(label))}</strong><small>${description}</small></div></label>`).join('')}</div><p class="small">${esc(t('exportHint'))}</p>${this._notice(t('exportWarning'),'warning')}`;
+    const body = `<fieldset class="scope-options"><legend>${esc(t('exportWhich'))}</legend>${scopes.map(([value,label,count]) => `<label class="check-label"><input type="radio" name="export-scope" data-field="export-scope" value="${value}" ${this._exportScope === value ? 'checked' : ''} ${!count ? 'disabled' : ''}>${esc(label)} <span class="count">${count}</span></label>`).join('')}</fieldset><div class="export-options">${[['json','jsonBackup','JSON'],['csv','tableFormat','CSV'],['scmb','encryptedBackup','SCMB']].map(([format,label,description]) => `<label class="export-option"><input type="radio" name="export-format" data-field="export-format" value="${format}" ${(this._exportFormat || 'json') === format ? 'checked' : ''}><div><strong>${esc(t(label))}</strong><small>${description}</small></div></label>`).join('')}</div><p class="small">${esc(t('exportHint'))}</p>${this._exportFormat === 'scmb' ? this._passwordInput(true) : this._notice(t('exportWarning'),'warning')}`;
     const valid = this._exportScope === 'all' || this._exportScopes[this._exportScope]?.length;
     return this._modalFrame(t('exportTitle'),body,this._button('close-modal',t('cancel'))+this._button('download-export',t(this._busy ? 'exporting' : 'export'),'upload','primary',valid ? '' : 'disabled'));
   }
@@ -1129,7 +1277,7 @@ class SetupCodeManagerPanel extends HTMLElement {
     }
   }
   _captureCandidates(protocol) {
-    return filterRecords(this._devices,{...this._viewSettings(),protocol:'',codeStatus:'all',query:this._query},this._hass?.language).filter(record => !record.archived && !hasCode(record,protocol));
+    return this._filteredDevices({...this._viewSettings(),protocol:'',codeStatus:'all'}).filter(record => !record.archived && !hasCode(record,protocol));
   }
   _renderCaptureSetup() {
     const t = this._t, count = this._captureCandidates(this._captureProtocol).length;
@@ -1141,12 +1289,16 @@ class SetupCodeManagerPanel extends HTMLElement {
     this._captureQueue = {ids,index:0,saved:0,skipped:0,protocol:this._captureProtocol};
     this._openCaptureStep();
   }
-  _openCaptureStep() {
+  async _openCaptureStep() {
     const queue = this._captureQueue;
     if (!queue) return;
     while (queue.index < queue.ids.length) {
-      const record = this._devices.find(item => item.id === queue.ids[queue.index]);
+      let record = this._devices.find(item => item.id === queue.ids[queue.index]);
       if (record && !record.archived && !hasCode(record,queue.protocol)) {
+        if (this._summaries && record.codes.length) {
+          record = await this._readPrivate(record);
+          if (!record) { if (this._captureQueue === queue) { this._captureQueue = null; this._openModal('capture-setup'); } return; }
+        }
         this._selectedId = null; this._newDraft(record); this._activeProtocol = queue.protocol; this._addSlot(queue.protocol); this._dirty = false; this._openModal('editor'); return;
       }
       queue.index++; queue.skipped++;
@@ -1160,24 +1312,37 @@ class SetupCodeManagerPanel extends HTMLElement {
     this._closeModal(true,true); this._captureQueue.index++; this._captureQueue.skipped++; this._openCaptureStep();
   }
   async _export() {
+    const encrypted = this._exportFormat === 'scmb';
+    const password = encrypted ? this.shadowRoot.querySelector('[data-field="backup-password"]').value : '';
+    if (encrypted && (password.length < 12 || password !== this.shadowRoot.querySelector('[data-field="backup-repeat"]').value)) {
+      this._modalError = this._t('passwordMismatch'); this._renderModal(); return;
+    }
+    const controller = new AbortController(); this._backupController = controller;
     const generation = this._dialogGeneration, modal = this._modal;
     this._busy = true; this._renderModal();
     try {
       const ids = this._exportScope === 'all' ? null : this._exportScopes?.[this._exportScope];
       if (this._exportScope !== 'all' && !ids?.length) throw {code:'empty_selection'};
-      const result = await this._api('export',{format:this._exportFormat || 'json',...(ids ? {record_ids:ids} : {})});
+      const result = await this._api('export',{format:encrypted ? 'json' : this._exportFormat || 'json',...(ids ? {record_ids:ids} : {})});
       if (generation !== this._dialogGeneration || modal !== this._modal) return;
-      const blob = new Blob([result.content],{type:result.mime});
+      const content = encrypted ? await runBackup('encrypt',result.content,password,controller.signal) : result.content;
+      if (controller.signal.aborted || generation !== this._dialogGeneration || modal !== this._modal) return;
+      const blob = new Blob([content],{type:encrypted ? 'application/octet-stream' : result.mime});
       const url = URL.createObjectURL(blob); const link = document.createElement('a');
-      link.href = url; link.download = result.filename; document.body.appendChild(link); link.click(); link.remove();
-      setTimeout(() => URL.revokeObjectURL(url),1000);
+      link.href = url; link.download = encrypted ? result.filename.replace(/\.json$/i,'.scmb') : result.filename; document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url),60000).unref?.();
       this._busy = false; this._closeModal(true);
     } catch (error) { if (generation !== this._dialogGeneration || modal !== this._modal) return; this._busy = false; this._modalError = this._t(error?.code === 'not_found' ? 'selectionExpired' : error?.code === 'empty_selection' ? 'selectionEmpty' : 'saveFailed'); this._renderModal(); }
+    finally { if (this._backupController === controller) this._backupController = null; }
   }
   _chooseImport() {
     const generation = this._dialogGeneration;
-    this._chooseFile('.json,.csv,application/json,text/csv',async file => {
+    this._chooseFile('.json,.csv,.scmb,application/json,text/csv,application/octet-stream',async file => {
       if (generation !== this._dialogGeneration || this._modal?.kind !== 'import') return;
+      if (/\.scmb$/i.test(file.name)) {
+        if (file.size > 16*1024*1024 + 53) { this._modalError = this._t('fileTooLarge'); this._renderModal(); return; }
+        this._openModal('unlock',{file}); return;
+      }
       if (file.size > 16 * 1024 * 1024) { this._modalError = this._t('fileTooLarge'); this._renderModal(); return; }
       const format = /\.csv$/i.test(file.name) ? 'csv' : /\.json$/i.test(file.name) ? 'json' : null;
       if (!format) { this._modalError = this._t('invalidFile'); this._renderModal(); return; }
@@ -1185,13 +1350,30 @@ class SetupCodeManagerPanel extends HTMLElement {
       catch { if (generation !== this._dialogGeneration) return; this._modalError = this._t('invalidFile'); this._renderModal(); }
     });
   }
+  async _unlockBackup() {
+    const modal = this._modal, password = this.shadowRoot.querySelector('[data-field="backup-password"]').value;
+    if (modal?.kind !== 'unlock' || !password || this._busy) return;
+    const controller = new AbortController(); this._backupController = controller;
+    this._busy = true; this._modalError = ''; this._renderModal();
+    try {
+      const buffer = await modal.file.arrayBuffer();
+      if (controller.signal.aborted || modal !== this._modal) return;
+      const content = await runBackup('decrypt',buffer,password,controller.signal);
+      if (controller.signal.aborted || modal !== this._modal) return;
+      this._importSource = {name:modal.file.name,format:'json',content};
+      this._busy = false;
+      await this._loadPreview();
+    } catch {
+      if (modal === this._modal) { this._busy = false; this._modalError = this._t('backupFailed'); this._renderModal(); }
+    } finally { if (this._backupController === controller) this._backupController = null; }
+  }
   async _loadPreview() {
     if (!this._importSource) return;
     const generation = this._dialogGeneration;
     this._busy = true; this._modalError = ''; this._renderModal();
     try {
       const {format,content} = this._importSource;
-      const result = await this._api('preview_import',{format,...(content !== undefined ? {content} : {})});
+      const result = await this._api('preview_import',{format,content});
       if (generation !== this._dialogGeneration || !this._modal) return;
       this._preview = result; this._decisions = Object.fromEntries(result.rows.map(row => [row.key,row.status === 'new' ? 'add' : 'skip']));
       this._importCompare = null; this._compareRevealed.clear(); this._busy = false; this._importErrorCode = '';
@@ -1203,18 +1385,27 @@ class SetupCodeManagerPanel extends HTMLElement {
     const counts = Object.fromEntries(['new','unchanged','conflict','invalid'].map(status => [status,rows.filter(row => row.status === status).length]));
     const selected = rows.filter(row => ['add','replace'].includes(this._decisions[row.key])).length;
     const compare = rows.find(row => row.key === this._importCompare);
-    const body = `<p>${esc(this._importSource?.name || t('legacyTitle'))}</p><div class="import-summary"><strong>${rows.length} ${esc(t('records'))}</strong>${Object.entries(counts).map(([status,count]) => `<span class="badge status-${status}">${count} ${esc(t(status))}</span>`).join('')}</div><p>${esc(t('previewHint'))}</p>${rows.length ? `<div class="table-wrap"><table class="import-table"><thead><tr><th scope="col">${esc(t('device'))}</th><th scope="col">${esc(t('result'))}</th><th scope="col">${esc(t('action'))}</th></tr></thead><tbody>${rows.map(row => `<tr><td>${esc(row.name || '—')}${row.reason ? `<small class="row-reason">${esc(row.reason)}</small>` : ''}</td><td class="status-${row.status}">${esc(t(row.status))}</td><td>${row.status === 'new' ? `<label class="check-label"><input type="checkbox" data-field="import-choice" data-key="${esc(row.key)}" ${this._decisions[row.key] === 'add' ? 'checked' : ''} ${this._busy ? 'disabled' : ''}>${esc(t('addImport'))}</label>` : row.status === 'conflict' ? this._button('import-compare',t(this._decisions[row.key] === 'replace' ? 'replace' : 'compare'),'','',`data-key="${esc(row.key)}"`) : esc(t('skip'))}</td></tr>`).join('')}</tbody></table></div>` : this._notice(t('noImportRows'))}${compare ? `<section class="import-conflict"><h3>${esc(t('conflictRecords'))} · ${esc(compare.name)}</h3><p class="muted small">${esc(t('compareHint'))}</p><div class="compare-grid">${this._compareRecord(compare.existing,t('existing'),'import-existing')}${this._compareRecord(compare.incoming,t('fromFile'),'import-incoming')}</div><div class="compare-choices"><label class="check-label"><input type="radio" name="resolve-${esc(compare.key)}" data-field="resolve-import" data-key="${esc(compare.key)}" value="skip" ${this._decisions[compare.key] === 'skip' ? 'checked' : ''}>${esc(t('keepExisting'))}</label><label class="check-label"><input type="radio" name="resolve-${esc(compare.key)}" data-field="resolve-import" data-key="${esc(compare.key)}" value="replace" ${this._decisions[compare.key] === 'replace' ? 'checked' : ''}>${esc(t('replace'))}</label></div></section>` : ''}<p class="small muted" style="margin-top:15px">${esc(t('skipNotice'))}</p>${['conflict','preview_expired'].includes(this._importErrorCode) ? this._button('preview-again',t('previewAgain'),'refresh') : ''}`;
+    const differences = row => {
+      const fields = {name:'name',location:'location',manufacturer:'manufacturer',model:'model',serial_number:'serial',notes:'note',archived:'archive',links:'linked'};
+      const lines = (row.code_changes || []).map(change => `${protocolNames[change.protocol]} · ${t('code_'+change.kind)}`);
+      if (row.changed_fields?.length) lines.push(`${t('changedFields')} · ${row.changed_fields.map(key=>t(fields[key])).join(', ')}`);
+      return lines.map(line=>`<small class="row-reason">${esc(line)}</small>`).join('');
+    };
+    const body = `<p>${esc(this._importSource.name)}</p><div class="import-summary"><strong>${rows.length} ${esc(t(rows.length === 1 ? 'singleRecord' : 'records'))}</strong>${Object.entries(counts).map(([status,count]) => `<span class="badge status-${status}">${count} ${esc(t(status))}</span>`).join('')}</div>${rows.length ? `<div class="table-wrap"><table class="import-table"><thead><tr><th scope="col">${esc(t('device'))}</th><th scope="col">${esc(t('result'))}</th><th scope="col">${esc(t('action'))}</th></tr></thead><tbody>${rows.map(row => `<tr><td>${esc(row.name || '—')}${row.reason ? `<small class="row-reason">${esc(row.reason)}</small>` : ''}</td><td class="status-${row.status}">${esc(t(row.status))}${differences(row)}</td><td>${row.status === 'new' ? `<label class="check-label"><input type="checkbox" data-field="import-choice" data-key="${esc(row.key)}" ${this._decisions[row.key] === 'add' ? 'checked' : ''} ${this._busy ? 'disabled' : ''}>${esc(t('addImport'))}</label>` : row.status === 'conflict' ? this._button('import-compare',t(this._decisions[row.key] === 'replace' ? 'replace' : 'compare'),'','',`data-key="${esc(row.key)}"`) : esc(t('skip'))}</td></tr>`).join('')}</tbody></table></div>` : this._notice(t('noImportRows'))}${compare ? `<section class="import-conflict"><h3>${esc(t('conflictRecords'))} · ${esc(compare.name)}</h3><p class="muted small">${esc(t('compareHint'))}</p><div class="compare-grid">${this._compareRecord(compare.existing,t('existing'),'import-existing')}${this._compareRecord(compare.incoming,t('fromFile'),'import-incoming')}</div><div class="compare-choices"><label class="check-label"><input type="radio" name="resolve-${esc(compare.key)}" data-field="resolve-import" data-key="${esc(compare.key)}" value="skip" ${this._decisions[compare.key] === 'skip' ? 'checked' : ''}>${esc(t('keepExisting'))}</label><label class="check-label"><input type="radio" name="resolve-${esc(compare.key)}" data-field="resolve-import" data-key="${esc(compare.key)}" value="replace" ${this._decisions[compare.key] === 'replace' ? 'checked' : ''}>${esc(t('replace'))}</label></div></section>` : ''}<p class="small muted" style="margin-top:15px">${esc(t('skipNotice'))}</p>${['conflict','preview_expired'].includes(this._importErrorCode) ? this._button('preview-again',t('previewAgain'),'refresh') : ''}`;
     return this._modalFrame(t('previewTitle'),body,this._button('close-modal',t('cancel'))+this._button('commit-import',t(this._busy ? 'importing' : 'importSelected',{count:selected}),'','primary',selected && !['conflict','preview_expired'].includes(this._importErrorCode) ? '' : 'disabled'),true);
   }
   async _commitImport() {
     if (this._busy || !this._preview) return;
+    const preview = this._preview;
     const changes = Object.values(this._decisions).filter(value => value !== 'skip').length;
     if (!changes) return;
     this._busy = true; this._renderModal();
     try {
       const result = await this._api('import',{token:this._preview.token,expected_revision:this._preview.revision,decisions:this._decisions});
+      if (this._preview !== preview) return;
       this._busy = false; this._closeModal(true); await this._refresh(false); this._toast(this._t('imported',{count:result.imported}));
     } catch (error) {
+      if (this._preview !== preview) return;
       this._busy = false; this._importErrorCode = error?.code || '';
       this._modalError = this._t(error?.code === 'conflict' ? 'importConflict' : error?.code === 'preview_expired' ? 'previewExpired' : 'importFailed'); this._renderModal();
     }
@@ -1222,7 +1413,7 @@ class SetupCodeManagerPanel extends HTMLElement {
   _onInput(event) {
     const el = event.target; const field = el.dataset.field;
     if (['name','location'].includes(field) && this._identityManaged()) return;
-    if (field === 'search') { this._query = el.value; this._selection.clear(); this._renderMain(); }
+    if (field === 'search') { this._query = el.value; this._scheduleSearch(); this._selection.clear(); this._renderMain(); }
     else if (field === 'view-name') this._viewName = el.value;
     else if (field === 'picker-search') { this._pickerQuery = el.value; this._renderModal(); }
     else if (field === 'relink-search' && this._modal?.kind === 'relink-picker') {
@@ -1243,7 +1434,7 @@ class SetupCodeManagerPanel extends HTMLElement {
     const el = event.target; const field = el.dataset.field;
     const filters = {'protocol-filter':'_protocol','code-status-filter':'_codeStatusFilter','room-filter':'_room','floor-filter':'_floor','label-filter':'_label','sort-filter':'_sort','group-filter':'_group'};
     if (filters[field]) { this[filters[field]] = el.value; if (!['sort-filter','group-filter'].includes(field)) this._selection.clear(); this._renderMain(); }
-    else if (field === 'saved-view') this._applyView(el.value);
+    else if (field === 'saved-view' || field === 'quick-view') this._applyView(el.value);
     else if (field === 'record-selection') { el.checked ? this._selection.add(el.dataset.id) : this._selection.delete(el.dataset.id); this._renderMain(); }
     else if (field === 'export-scope') { this._exportScope = el.value; this._renderModal(); }
     else if (field === 'pdf-notes') this._pdfNotes = el.checked;
@@ -1253,7 +1444,7 @@ class SetupCodeManagerPanel extends HTMLElement {
       if (code.protocol !== el.value) this._clearScanConfirmation(code.protocol);
       code.protocol = el.value; this._activeProtocol = el.value; this._dirty = true; this._renderModal();
     }
-    else if (field === 'export-format') this._exportFormat = el.value;
+    else if (field === 'export-format') { this._exportFormat = el.value; this._renderModal(); this.shadowRoot.querySelector(`[data-field="export-format"][value="${el.value}"]`)?.focus({preventScroll:true}); }
     else if (field === 'import-choice') { this._decisions[el.dataset.key] = el.checked ? 'add' : 'skip'; this._renderModal(); }
     else if (field === 'resolve-import') { this._decisions[el.dataset.key] = el.value; this._renderModal(); }
   }
@@ -1261,12 +1452,17 @@ class SetupCodeManagerPanel extends HTMLElement {
     const button = event.target.closest?.('[data-action]');
     if (!button || button.disabled || this._busyBlocks(button.dataset.action)) return;
     const action = button.dataset.action;
+    if (!this._modal) this._invoker = this._actionFocus(button);
     if (action === 'ignore-selection') return;
     const id = button.dataset.id;
-    const record = this._devices.find(item => item.id === (id || this._selectedId));
+    let record = this._devices.find(item => item.id === (id || this._selectedId));
     const code = record?.codes?.find(item => item.id === button.dataset.code);
     try {
+      if (code && ['reveal','reveal-manual','qr','copy','copy-manual'].includes(action)) {
+        await this._codeAction(action,record,code); return;
+      }
       if (action === 'ha-menu') this.dispatchEvent(new CustomEvent('hass-toggle-menu',{bubbles:true,composed:true}));
+      else if (action === 'retry-search') { this._scheduleSearch(); this._renderMain(); }
       else if (action === 'refresh') await this._refresh();
       else if (action === 'refresh-menu') { this._closeModal(true); await this._refresh(); }
       else if (action === 'tab') { this._closeFilters(); this._tab = button.dataset.tab; this._selectedId = null; this._selection.clear(); this._activeViewId = ''; this._renderMain(); }
@@ -1291,13 +1487,19 @@ class SetupCodeManagerPanel extends HTMLElement {
       else if (action === 'capture-start') { this._captureProtocol = this._protocol || 'matter'; this._openModal('capture-setup'); }
       else if (action === 'capture-begin') this._startCaptureQueue();
       else if (action === 'capture-skip') this._skipCapture();
-      else if (action === 'select') { this._closeFilters(); this._selectedId = id; this._revealed.clear(); this._revealedManual.clear(); this._renderMain(); this.scrollIntoView({block:'start',behavior:'instant'}); this.shadowRoot.querySelector('.detail-heading h2')?.setAttribute('tabindex','-1'); this.shadowRoot.querySelector('.detail-heading h2')?.focus({preventScroll:true}); }
+      else if (action === 'select') { this._closeFilters(); this._selectedId = id; this._maskDetails(); this._renderMain(); this.scrollIntoView({block:'start',behavior:'instant'}); this.shadowRoot.querySelector('.detail-heading h2')?.setAttribute('tabindex','-1'); this.shadowRoot.querySelector('.detail-heading h2')?.focus({preventScroll:true}); }
       else if (action === 'close-details') this._closeDetails();
       else if (action === 'menu') this._openModal('menu');
       else if (action === 'add') { this._newDraft(); this._openModal('start'); }
-      else if (['edit','edit-links','edit-codes'].includes(action) && record) {
-        this._newDraft(record,action === 'edit-codes');
+      else if (['edit','edit-links','edit-codes','add-missing'].includes(action) && record) {
+        if (action === 'edit-links' && this._canRelink(record)) {
+          this._newDraft(record); await this._openRelinkPicker(false); return;
+        }
+        if (this._summaries && record.codes.length) { record = await this._readPrivate(record); if (!record) return; }
+        this._newDraft(record,['edit-codes','add-missing'].includes(action));
         if (action === 'edit-codes') this._addSlot();
+        if (action === 'add-missing') { this._activeProtocol = this._protocol || displayProtocols(record)[0] || 'matter'; this._addSlot(this._activeProtocol); }
+        this._dirty = false;
         if (action === 'edit-links') await this._openPicker(); else this._openModal('editor');
       }
       else if (action === 'close-modal') this._closeModal();
@@ -1318,29 +1520,58 @@ class SetupCodeManagerPanel extends HTMLElement {
       }
       else if (action === 'remove-link') { this._draft.links.splice(Number(button.dataset.index),1); this._applyDraftIdentity(); this._dirty = true; this._renderModal(); }
       else if (action === 'form-reveal') { const key = this._draft.codes[Number(button.dataset.index)].id; this._formRevealed.has(key) ? this._formRevealed.delete(key) : this._formRevealed.add(key); this._renderModal(); }
-      else if (action === 'reveal' && code) { this._revealed.has(code.id) ? this._revealed.delete(code.id) : this._revealed.add(code.id); this._renderMain(); }
-      else if (action === 'reveal-manual' && this._manualValue(code)) { this._revealedManual.has(code.id) ? this._revealedManual.delete(code.id) : this._revealedManual.add(code.id); this._renderMain(); }
-      else if (action === 'copy-manual' && this._manualValue(code)) await this._copyCodeValue(this._manualValue(code),'manualCopied','manualCopyFailed');
-      else if (action === 'copy' && code) await this._copyCodeValue(code.value);
-      else if (action === 'qr' && code) this._openModal('qr',{code,name:record.name});
+      else if (action === 'copy-ready' && this._modal?.kind === 'copy-ready') {
+        const modal = this._modal;
+        if (await this._copyCodeValue(modal.value,modal.success,modal.failure) && this._modal === modal) this._closeModal(true);
+      }
       else if (action === 'archive' && record) await this._archiveRecord(record);
       else if (action === 'delete' && record) this._openModal('delete',{record,revision:this._revision});
       else if (action === 'confirm-delete') await this._deleteRecord();
       else if (action === 'picker') await this._openPicker();
       else if (action === 'picker-all' || action === 'picker-missing') { this._pickerAll = action === 'picker-all'; this._renderModal(); }
-      else if (action === 'pick-device') this._selectHADevice(id);
+      else if (action === 'pick-device') await this._selectHADevice(id);
       else if (action === 'pick-relink-device') this._selectRelinkDevice(id);
       else if (action === 'confirm-relink') await this._confirmRelink();
       else if (action === 'back-relink-picker' && this._modal?.kind === 'relink-confirm') this._openModal('relink-picker',this._modal.picker);
       else if (action === 'retry-relink' && this._modal?.kind === 'relink-picker') await this._openRelinkPicker(this._modal.fromEditor);
-      else if (action === 'use-record') this._useHADevice(this._pendingDevice,this._devices.find(item => item.id === id));
+      else if (action === 'use-record') await this._useHADevice(this._pendingDevice,this._devices.find(item => item.id === id));
       else if (action === 'back-picker') this._openModal('picker');
       else if (action === 'without-link') { this._draft.links = []; this._dirty = true; this._openModal('editor'); }
+      else if (action === 'use-printed' && this._modal?.kind === 'ocr-confirm') {
+        const value = this._modal.candidates[Number(button.dataset.index)];
+        if (!value) return;
+        this._activeProtocol = this._detected = 'matter'; this._dirty = true;
+        this._pendingCodes = [{id:uid(),protocol:'matter',value,label:''}];
+        this._applyPendingCodes();
+      }
       else if (action === 'keep-code') { this._detected = null; this._applyPendingCodes(); }
       else if (action === 'replace-code') { Object.assign(this._modal.current,{value:this._modal.incoming.value,label:this._modal.incoming.label || this._modal.current.label}); this._dirty = true; this._applyPendingCodes(); }
-      else if (action === 'compare-reveal') { const key = button.dataset.key; this._compareRevealed.has(key) ? this._compareRevealed.delete(key) : this._compareRevealed.add(key); this._renderModal(); }
+      else if (action === 'compare-reveal') {
+        const key = button.dataset.key;
+        if (this._compareRevealed.delete(key)) this._previewSecrets.delete(key);
+        else {
+          const match = /^import-(existing|incoming)-(\d+)$/.exec(key);
+          if (match && this._modal?.kind === 'preview') {
+            const preview = this._preview, row = preview.rows.find(item => item.key === this._importCompare);
+            const side = match[1], code = row?.[side]?.codes[Number(match[2])];
+            if (!code) return;
+            if (code.stored && !code.value) {
+              const ticket = ++this._secretSequence;
+              const result = await this._api('preview_code',{token:preview.token,key:row.key,side,code_id:code.id});
+              if (preview !== this._preview || row.key !== this._importCompare || ticket !== this._secretSequence || globalThis.document?.hidden) return;
+              this._previewSecrets.set(key,result.value);
+            }
+          }
+          this._compareRevealed.add(key);
+        }
+        this._renderModal();
+      }
       else if (action === 'save-anyway') await this._save(true);
-      else if (action === 'compare-revision') { const result = await this._refresh(false); if (result) this._openModal('revision',{current:result.devices.find(item => item.id === this._draft.id),revision:result.revision}); }
+      else if (action === 'compare-revision') { const result = await this._refresh(false); if (result && this._draft) {
+        let current = result.devices.find(item => item.id === this._draft.id);
+        if (this._summaries && current?.codes.length) { current = await this._readPrivate(current); if (!current) return; }
+        this._openModal('revision',{current,revision:result.revision});
+      } }
       else if (action === 'load-current') { const comparedRevision = this._modal.revision; this._newDraft(this._modal.current); this._baseRevision = comparedRevision; this._openModal('editor'); }
       else if (action === 'keep-draft') { this._baseRevision = this._modal.revision; this._baseRecord = clone(this._modal.current); this._draftError = ''; this._draftErrorCode = ''; this._openModal('editor'); }
       else if (action === 'save-as-new') { delete this._draft.id; this._draft.links = []; this._baseRevision = this._modal.revision; this._baseRecord = blankRecord(); this._draftError = ''; this._draftErrorCode = ''; this._openModal('editor'); }
@@ -1348,9 +1579,9 @@ class SetupCodeManagerPanel extends HTMLElement {
       else if (action === 'export') this._openExport();
       else if (action === 'download-export') await this._export();
       else if (action === 'import') { this._dialogGeneration++; this._openModal('import'); }
+      else if (action === 'unlock-backup') await this._unlockBackup();
       else if (action === 'pick-import') this._chooseImport();
-      else if (action === 'legacy') { this._importSource = {format:'legacy',name:this._t('legacyTitle')}; this._openModal('import'); await this._loadPreview(); }
-      else if (action === 'import-compare') { this._importCompare = button.dataset.key; this._compareRevealed.clear(); this._renderModal(); this.shadowRoot.querySelector('.import-conflict')?.scrollIntoView({block:'nearest'}); }
+      else if (action === 'import-compare') { this._importCompare = button.dataset.key; this._previewSecrets.clear(); this._secretSequence++; this._compareRevealed.clear(); this._renderModal(); this.shadowRoot.querySelector('.import-conflict')?.scrollIntoView({block:'nearest'}); }
       else if (action === 'preview-again') await this._loadPreview();
       else if (action === 'commit-import') await this._commitImport();
     } catch (error) {

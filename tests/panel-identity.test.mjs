@@ -82,8 +82,8 @@ test('a reachable device with a missing code has a separate, labelled warning in
   const { panel } = fixture(item);
   const html = panel._renderListRow(item);
   assert.match(html, /class="mobile-ha-status"[^]*class="dot online"[^]*Erreichbar/);
-  assert.match(html, /class="mobile-code-status"><span class="code-status missing"><svg[^]*Code fehlt<\/span><\/span>/);
-  assert.match(html, /<td><span class="code-status missing"><svg[^]*Code fehlt<\/span>/);
+  assert.match(html, /class="mobile-code-status"><button[^>]*data-action="add-missing"[^>]*aria-label="[^"]+"[^>]*><svg[^]*Code fehlt<\/button><\/span>/);
+  assert.match(html, /<td><button[^>]*data-action="add-missing"[^>]*><svg[^]*Code fehlt<\/button>/);
   assert.doesNotMatch(html, /Code gespeichert/);
 });
 
@@ -252,7 +252,8 @@ test('synthetic HA rename and area controls update runtime identity, save author
   demo.renameHADevice('ha-1', 'Renamed synthetic socket');
   demo.setHAArea('ha-1', 'Synthetic new room');
   const first = await demo.callWS({ type: 'setup_code_manager/list' });
-  const edited = first.devices.find(item => item.id === 'demo-1');
+  assert.equal(first.devices.find(item => item.id === 'demo-1').codes[0].value,undefined);
+  const {record:edited} = await demo.callWS({type:'setup_code_manager/read_record',record_id:'demo-1',expected_revision:first.revision});
   assert.equal(edited.name, 'Renamed synthetic socket');
   assert.equal(edited.location, 'Synthetic new room');
   assert.equal(edited.links[0].location, 'Synthetic new room');
@@ -274,7 +275,8 @@ test('synthetic HA rename and area controls update runtime identity, save author
   assert.equal(removed.name, 'Renamed synthetic socket');
   assert.equal(removed.location, '');
   assert.equal(removed.notes, 'Own note survives');
-  assert.equal(removed.codes[0].value, MATTER);
+  assert.equal(removed.codes[0].has_manual,true);
+  assert.equal(demo.snapshot().devices.find(item=>item.id===edited.id).codes[0].value,MATTER);
   assert.equal(removed.links[0].active, false);
   assert.equal(removed.linked, false);
 });

@@ -133,8 +133,12 @@ class SetupCodesStore:
         return deepcopy(self._data)
 
     @property
+    def revision(self) -> int:
+        return self._data["revision"]
+
+    @property
     def devices(self) -> list[dict[str, Any]]:
         return deepcopy(self._data["devices"])
 
     def get(self, record_id: str) -> dict[str, Any] | None:
-        return next((r for r in self.devices if r["id"] == record_id), None)
+        return next((deepcopy(r) for r in self._data["devices"] if r["id"] == record_id), None)

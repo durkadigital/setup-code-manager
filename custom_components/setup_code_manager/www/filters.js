@@ -8,7 +8,7 @@ const list = value => Array.isArray(value) ? value : [];
 const links = record => list(record?.links).filter(link => link && typeof link === 'object');
 const activeLinks = record => links(record).filter(link => link.active !== false);
 const codes = record => list(record?.codes).filter(code => code && typeof code === 'object');
-const storedCodes = record => codes(record).filter(code => text(code.value).trim());
+const storedCodes = record => codes(record).filter(code => code.stored === true || text(code.value).trim());
 const isLinked = record => typeof record?.linked === 'boolean' ? record.linked : links(record).some(link => link.active !== false);
 const hasCode = (record, protocol) => storedCodes(record).some(code => !protocol || code.protocol === protocol);
 const displayProtocols = record => [...new Set([

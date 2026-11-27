@@ -1,3 +1,8 @@
 custom_components/setup_code_manager/www/vendor/** linguist-vendored
 # Preserve the upstream license byte-for-byte, including its final blank line.
 custom_components/setup_code_manager/www/vendor/jsQR.LICENSE whitespace=-blank-at-eof
+custom_components/setup_code_manager/www/vendor/ocr/CORE-LICENSE whitespace=-blank-at-eof
+# Keep the published noble ESM files byte-for-byte identical to the npm packages.
+custom_components/setup_code_manager/www/vendor/noble-ciphers/utils.js whitespace=-blank-at-eol
+custom_components/setup_code_manager/www/vendor/noble-hashes/sha2.js whitespace=-blank-at-eol
+custom_components/setup_code_manager/www/vendor/noble-hashes/utils.js whitespace=-blank-at-eol

@@ -128,3 +128,20 @@ def serialize_record(hass: HomeAssistant, record: dict[str, Any]) -> dict[str, A
     result["available"] = any(link["available"] for link in result["links"])
     result["protocols"] = sorted(protocols)
     return result
+
+
+def summary_record(hass: HomeAssistant, record: dict[str, Any]) -> dict[str, Any]:
+    """Expose display metadata without sending a pairing secret in the inventory."""
+    result = serialize_record(hass, record)
+    for code in result["codes"]:
+        value = code.pop("value")
+        code["stored"] = bool(value)
+        code["has_manual"] = bool(code.pop("manual_value", None))
+        code["has_qr"] = value.startswith(("MT:", "X-HM://")) or (
+            code["protocol"] == "zwave"
+            and value.startswith("90")
+            and len(value) >= 32
+            and value.isascii()
+            and value.isdecimal()
+        )
+    return result
